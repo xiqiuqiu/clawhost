@@ -197,10 +197,12 @@ func ProxyToBot(c echo.Context) error {
 	// ChatClaw pods: require token/cookie auth (no device pairing).
 	// OpenClaw-only pods: use legacy device pairing auto-approval.
 	chatclawMode := strings.HasSuffix(targetHost, fmt.Sprintf(":%d", k8s.ChatClawPort()))
-	accessToken := ""
+	accessToken, authenticated := validateSession(c, bot)
+	if authenticated {
+		setSessionCookie(c, bot)
+	}
 	if chatclawMode {
-		token, ok := validateSession(c, bot)
-		if !ok {
+		if !authenticated {
 			// Distinguish between invalid token and no credentials at all
 			if t := c.QueryParam("token"); t != "" {
 				return c.JSON(http.StatusUnauthorized, map[string]string{
@@ -211,12 +213,9 @@ func ProxyToBot(c echo.Context) error {
 				"error": "access token required, use ?token=<access_token>",
 			})
 		}
-		accessToken = token
-		setSessionCookie(c, bot)
 	} else {
 		// Legacy OpenClaw WebUI: auto-approval via polling
-		if token := c.QueryParam("token"); token != "" && token == bot.AccessToken {
-			accessToken = bot.AccessToken
+		if accessToken != "" {
 			go autoApprovePoller(bot.ID, accessToken)
 		}
 	}
@@ -293,7 +292,7 @@ func isWebSocketRequest(r *http.Request) bool {
 }
 
 // buildWSRequestHeaders builds the headers for the backend WebSocket connection
-func buildWSRequestHeaders(c echo.Context, targetHost string) http.Header {
+func buildWSRequestHeaders(c echo.Context, targetHost, accessToken string) http.Header {
 	requestHeader := http.Header{}
 	// Set Origin to the target host to pass OpenClaw's origin check
 	// OpenClaw doesn't support wildcard "*" in allowedOrigins
@@ -301,8 +300,11 @@ func buildWSRequestHeaders(c echo.Context, targetHost string) http.Header {
 	if protocol := c.Request().Header.Get("Sec-WebSocket-Protocol"); protocol != "" {
 		requestHeader.Set("Sec-WebSocket-Protocol", protocol)
 	}
-	// Forward Authorization header for password auth
-	if auth := c.Request().Header.Get("Authorization"); auth != "" {
+	// Always pass the trusted bot access token when we have one so reconnects
+	// don't depend on the browser repeating ?token= on every websocket attempt.
+	if accessToken != "" {
+		requestHeader.Set("Authorization", "Bearer "+accessToken)
+	} else if auth := c.Request().Header.Get("Authorization"); auth != "" {
 		requestHeader.Set("Authorization", auth)
 	}
 	// Forward Cookie header (OpenClaw may use cookie for session)
@@ -320,6 +322,21 @@ func buildWSRequestHeaders(c echo.Context, targetHost string) http.Header {
 	return requestHeader
 }
 
+func buildBackendQuery(rawQuery, accessToken string) string {
+	if accessToken == "" {
+		return rawQuery
+	}
+
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return rawQuery
+	}
+	if values.Get("token") == "" {
+		values.Set("token", accessToken)
+	}
+	return values.Encode()
+}
+
 func proxyWebSocket(c echo.Context, targetHost, path, botID, accessToken string) error {
 	// Upgrade client connection
 	clientConn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
@@ -333,10 +350,10 @@ func proxyWebSocket(c echo.Context, targetHost, path, botID, accessToken string)
 		Scheme:   "ws",
 		Host:     targetHost,
 		Path:     path,
-		RawQuery: c.QueryString(),
+		RawQuery: buildBackendQuery(c.QueryString(), accessToken),
 	}
 
-	requestHeader := buildWSRequestHeaders(c, targetHost)
+	requestHeader := buildWSRequestHeaders(c, targetHost, accessToken)
 
 	// Dial backend with auto-approval retry for NOT_PAIRED errors
 	backendConn, resp, err := websocket.DefaultDialer.Dial(backendURL.String(), requestHeader)

@@ -8,6 +8,9 @@ data:
     [server]
     port = 18080
 
+    [api]
+    admin_token = "clawhost-admin-aCBGpu7Af0vMcOpP"
+
     [db]
     host = "clawhost-pg"
     port = 5432
@@ -38,16 +41,3 @@ data:
     memory_limit = "8Gi"
     cpu_request = "500m"
     memory_request = "1Gi"
-
-    # ChatClaw WebUI (optional, uncomment to enable)
-    # [chatclaw]
-    # image = "chatclaw:latest"
-    # port = 3000
-    # cpu_limit = "1000m"
-    # memory_limit = "1Gi"
-    # cpu_request = "100m"
-    # memory_request = "256Mi"
-    # db_backend = "drizzle"
-    # data_dir = "/data"
-    # auth_enabled = "false"
-    # multi_company = "false"
