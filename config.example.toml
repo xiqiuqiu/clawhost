@@ -35,6 +35,8 @@ memory_limit = "8Gi"
 cpu_request = "500m"
 memory_request = "1Gi"
 
+
+
 # ChatClaw WebUI (optional, uncomment to enable)
 # When enabled, ChatClaw is deployed as a sidecar alongside OpenClaw in each bot pod.
 # When disabled (default), OpenClaw's built-in WebUI is used.

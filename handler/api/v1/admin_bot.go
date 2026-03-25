@@ -38,6 +38,16 @@ func AdminCreateBot(c echo.Context) error {
 		Status: model.BotStatusCreated,
 	}
 
+	resolvedConfig, err := applyDefaultBotConfig(nil, loadDefaultBotConfig())
+	if err != nil {
+		return util.BadRequest(c, err.Error())
+	}
+	if len(resolvedConfig) > 0 {
+		if err := bot.SetConfigMap(resolvedConfig); err != nil {
+			return util.InternalError(c, "failed to set config")
+		}
+	}
+
 	if err := model.CreateBot(bot); err != nil {
 		return util.InternalError(c, "failed to create bot")
 	}

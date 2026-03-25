@@ -66,8 +66,12 @@ func CreateBot(c echo.Context) error {
 	}
 
 	// Set config if provided (OpenClaw native format)
-	if req.Config != nil {
-		if err := bot.SetConfigMap(req.Config); err != nil {
+	resolvedConfig, err := applyDefaultBotConfig(req.Config, loadDefaultBotConfig())
+	if err != nil {
+		return util.BadRequest(c, err.Error())
+	}
+	if len(resolvedConfig) > 0 {
+		if err := bot.SetConfigMap(resolvedConfig); err != nil {
 			return util.InternalError(c, "failed to set config")
 		}
 	}
