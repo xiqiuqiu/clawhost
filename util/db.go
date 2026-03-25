@@ -65,3 +65,7 @@ func InitDB() error {
 func GetDB() *gorm.DB {
 	return db
 }
+
+func SetDBForTesting(testDB *gorm.DB) {
+	db = testDB
+}

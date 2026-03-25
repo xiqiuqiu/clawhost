@@ -153,13 +153,17 @@ func startServer() {
 	}
 
 	// Admin API routes: /bot/api/v1/admin/* (requires admin token)
-	admin := e.Group("/bot/api/v1/admin")
-	admin.Use(authmw.AdminAuth())
+	adminPublic := e.Group("/bot/api/v1/admin")
 	{
-		// Token verification
-		admin.GET("/verify", func(c echo.Context) error {
-			return c.JSON(200, map[string]interface{}{"code": 0, "message": "success"})
-		})
+		adminPublic.POST("/bootstrap", v1.BootstrapAdmin)
+		adminPublic.POST("/login", v1.AdminLogin)
+	}
+
+	admin := e.Group("/bot/api/v1/admin")
+	admin.Use(authmw.AdminSessionAuth())
+	{
+		admin.POST("/logout", v1.AdminLogout)
+		admin.GET("/me", v1.GetCurrentAdmin)
 
 		// Global config (for admin UI)
 		admin.GET("/config", func(c echo.Context) error {
