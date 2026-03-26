@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, LoaderCircleIcon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import {
   getAdminConfig,
@@ -71,16 +71,26 @@ const statusStyles: Record<string, string> = {
   error: "bg-red-100 text-red-700 border-red-200",
 };
 
+const TRANSITIONAL_BOT_STATUSES = new Set(["starting"]);
+
 function BotActions({
   bot,
   actionLoading,
   onAction,
   onDelete,
+  canStart,
+  canStop,
+  canDelete,
+  canUpgrade,
 }: {
   bot: Bot;
   actionLoading: string | null;
   onAction: (action: () => Promise<unknown>, msg: string, id: string) => void;
   onDelete: () => void;
+  canStart: boolean;
+  canStop: boolean;
+  canDelete: boolean;
+  canUpgrade: boolean;
 }) {
   return (
     <DropdownMenu>
@@ -91,25 +101,27 @@ function BotActions({
         ...
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {bot.status !== "running" && (
+        {canStart && bot.status !== "running" && (
           <DropdownMenuItem
             onClick={() => onAction(() => startBot(bot.id), "Bot started", bot.id)}
           >
             Start
           </DropdownMenuItem>
         )}
-        {bot.status === "running" && (
+        {canStop && bot.status === "running" && (
           <DropdownMenuItem
             onClick={() => onAction(() => stopBot(bot.id), "Bot stopped", bot.id)}
           >
             Stop
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem
-          onClick={() => onAction(() => upgradeBot(bot.id), "Bot upgraded", bot.id)}
-        >
-          Upgrade
-        </DropdownMenuItem>
+        {canUpgrade ? (
+          <DropdownMenuItem
+            onClick={() => onAction(() => upgradeBot(bot.id), "Bot upgraded", bot.id)}
+          >
+            Upgrade
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem
           onClick={() => {
             navigator.clipboard.writeText(bot.id);
@@ -127,16 +139,44 @@ function BotActions({
           Copy Token
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onClick={onDelete}>
-          Delete
-        </DropdownMenuItem>
+        {canDelete ? (
+          <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+            Delete
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
+function StatusBadge({
+  status,
+  active,
+}: {
+  status: Bot["status"];
+  active?: boolean;
+}) {
+  const showSpinner = status === "starting";
+
+  return (
+    <Badge variant="outline" className={statusStyles[status] || ""}>
+      <span className="inline-flex items-center gap-1.5">
+        {showSpinner ? (
+          <LoaderCircleIcon className={`size-3 ${active ? "animate-spin" : ""}`} />
+        ) : null}
+        <span>{status}</span>
+      </span>
+    </Badge>
+  );
+}
+
 export default function BotsPage() {
-  const { isAuthed } = useAuth();
+  const { isAuthed, hasPermission } = useAuth();
+  const canCreateBot = hasPermission("bots:create");
+  const canStartBot = hasPermission("bots:start");
+  const canStopBot = hasPermission("bots:stop");
+  const canDeleteBot = hasPermission("bots:delete");
+  const canUpgradeBot = hasPermission("bots:upgrade");
   const [bots, setBots] = useState<Bot[]>([]);
   const [appMap, setAppMap] = useState<Record<string, App>>({});
   const [globalDomainTemplate, setGlobalDomainTemplate] = useState("");
@@ -147,10 +187,18 @@ export default function BotsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForm, setCreateForm] = useState({ name: "", app_id: "", user_id: "" });
+  const [pageVisible, setPageVisible] = useState(true);
+  const fetchInFlightRef = useRef(false);
 
-  const fetchBots = useCallback(async () => {
+  const fetchBots = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (fetchInFlightRef.current) {
+      return;
+    }
     try {
-      setLoading(true);
+      fetchInFlightRef.current = true;
+      if (!silent) {
+        setLoading(true);
+      }
       const [botsRes, appsRes, configRes] = await Promise.all([
         listBots(),
         listApps(),
@@ -166,7 +214,10 @@ export default function BotsPage() {
     } catch (err) {
       toast.error("Failed to load bots: " + (err as Error).message);
     } finally {
-      setLoading(false);
+      fetchInFlightRef.current = false;
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -186,8 +237,22 @@ export default function BotsPage() {
   };
 
   useEffect(() => {
-    if (isAuthed) fetchBots();
+    if (isAuthed) {
+      void fetchBots();
+    }
   }, [isAuthed, fetchBots]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setPageVisible(document.visibilityState === "visible");
+    };
+
+    handleVisibilityChange();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   const handleAction = async (
     action: () => Promise<unknown>,
@@ -198,7 +263,7 @@ export default function BotsPage() {
       setActionLoading(botId || "bulk");
       await action();
       toast.success(successMsg);
-      fetchBots();
+      await fetchBots({ silent: true });
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -243,7 +308,7 @@ export default function BotsPage() {
       }
       setShowCreateDialog(false);
       setCreateForm({ name: "", app_id: "", user_id: "" });
-      fetchBots();
+      await fetchBots({ silent: true });
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -251,11 +316,26 @@ export default function BotsPage() {
     }
   };
 
-  if (!isAuthed) return null;
-
+  const hasTransitioningBots = bots.some((bot) => TRANSITIONAL_BOT_STATUSES.has(bot.status));
   const runningCount = bots.filter((b) => b.status === "running").length;
   const stoppedCount = bots.filter((b) => b.status === "stopped").length;
   const filteredBots = statusFilter === "all" ? bots : bots.filter((b) => b.status === statusFilter);
+
+  useEffect(() => {
+    if (!isAuthed || !pageVisible || !hasTransitioningBots) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void fetchBots({ silent: true });
+    }, 5000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [fetchBots, hasTransitioningBots, isAuthed, pageVisible]);
+
+  if (!isAuthed) return null;
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
@@ -266,6 +346,14 @@ export default function BotsPage() {
             {bots.length} total &middot; {runningCount} running &middot;{" "}
             {stoppedCount} stopped
           </p>
+          {hasTransitioningBots ? (
+            <p className="mt-1 inline-flex items-center gap-2 text-xs text-amber-700">
+              <LoaderCircleIcon className={`size-3.5 ${pageVisible ? "animate-spin" : ""}`} />
+              {pageVisible
+                ? "Checking bot startup status in the background."
+                : "Startup checks pause while this tab is in the background."}
+            </p>
+          ) : null}
         </div>
         <div className="flex gap-2 shrink-0 items-center">
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
@@ -281,15 +369,21 @@ export default function BotsPage() {
               <SelectItem value="error">Error</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" onClick={() => setShowCreateDialog(true)}>
-            Create Bot
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setBulkAction("upgrade")}>
-            Upgrade All
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setBulkAction("restart")}>
-            Restart All
-          </Button>
+          {canCreateBot ? (
+            <Button size="sm" onClick={() => setShowCreateDialog(true)}>
+              Create Bot
+            </Button>
+          ) : null}
+          {canUpgradeBot ? (
+            <Button variant="outline" size="sm" onClick={() => setBulkAction("upgrade")}>
+              Upgrade All
+            </Button>
+          ) : null}
+          {canUpgradeBot ? (
+            <Button variant="outline" size="sm" onClick={() => setBulkAction("restart")}>
+              Restart All
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -343,9 +437,7 @@ export default function BotsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={statusStyles[bot.status] || ""}>
-                        {bot.status}
-                      </Badge>
+                      <StatusBadge status={bot.status} active={pageVisible} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {new Date(bot.created_at).toLocaleDateString()}
@@ -356,6 +448,10 @@ export default function BotsPage() {
                         actionLoading={actionLoading}
                         onAction={handleAction}
                         onDelete={() => setDeleteTarget(bot)}
+                        canStart={canStartBot}
+                        canStop={canStopBot}
+                        canDelete={canDeleteBot}
+                        canUpgrade={canUpgradeBot}
                       />
                     </TableCell>
                   </TableRow>
@@ -373,12 +469,7 @@ export default function BotsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium">{bot.name}</span>
-                        <Badge
-                          variant="outline"
-                          className={`shrink-0 ${statusStyles[bot.status] || ""}`}
-                        >
-                          {bot.status}
-                        </Badge>
+                        <StatusBadge status={bot.status} active={pageVisible} />
                       </div>
                     </div>
                     <BotActions
@@ -386,6 +477,10 @@ export default function BotsPage() {
                       actionLoading={actionLoading}
                       onAction={handleAction}
                       onDelete={() => setDeleteTarget(bot)}
+                      canStart={canStartBot}
+                      canStop={canStopBot}
+                      canDelete={canDeleteBot}
+                      canUpgrade={canUpgradeBot}
                     />
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-muted-foreground">
@@ -426,7 +521,7 @@ export default function BotsPage() {
       )}
 
       {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+      <AlertDialog open={!!deleteTarget && canDeleteBot} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent className="max-w-[95vw] sm:max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Bot</AlertDialogTitle>
@@ -444,7 +539,7 @@ export default function BotsPage() {
       </AlertDialog>
 
       {/* Bulk Action Confirmation */}
-      <AlertDialog open={!!bulkAction} onOpenChange={() => setBulkAction(null)}>
+      <AlertDialog open={!!bulkAction && canUpgradeBot} onOpenChange={() => setBulkAction(null)}>
         <AlertDialogContent className="max-w-[95vw] sm:max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -466,7 +561,7 @@ export default function BotsPage() {
       </AlertDialog>
 
       {/* Create Bot Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+      <Dialog open={showCreateDialog && canCreateBot} onOpenChange={setShowCreateDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Create Bot</DialogTitle>

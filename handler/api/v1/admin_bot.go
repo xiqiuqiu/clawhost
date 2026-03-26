@@ -3,11 +3,77 @@ package v1
 import (
 	"context"
 
+	authmw "github.com/clawhost/clawhost/middleware"
 	"github.com/clawhost/clawhost/model"
+	auditservice "github.com/clawhost/clawhost/service/audit"
 	"github.com/clawhost/clawhost/service/k8s"
 	"github.com/clawhost/clawhost/util"
 	"github.com/labstack/echo/v4"
 )
+
+var getAdminDeploymentStatusInfoFn = func(botID string) (*k8s.DeploymentStatusInfo, error) {
+	return k8s.GetDeploymentStatusInfo(context.Background(), botID)
+}
+
+func resolveAdminBotRuntimeStatus(bot *model.Bot) *model.Bot {
+	cloned := *bot
+
+	if bot.Status == model.BotStatusCreated || bot.Status == model.BotStatusStopped {
+		return &cloned
+	}
+
+	statusInfo, err := getAdminDeploymentStatusInfoFn(bot.ID)
+	if err != nil || statusInfo == nil {
+		return &cloned
+	}
+
+	switch statusInfo.Status {
+	case "ready":
+		cloned.Status = model.BotStatusRunning
+	case "starting", "updating", "not_ready":
+		cloned.Status = model.BotStatusStarting
+	case "not_found":
+		if bot.Status == model.BotStatusRunning {
+			cloned.Status = model.BotStatusStopped
+			cloned.Endpoint = ""
+		}
+	}
+
+	if cloned.Status != bot.Status || cloned.Endpoint != bot.Endpoint {
+		if err := model.UpdateBot(&cloned); err != nil {
+			return &cloned
+		}
+	}
+
+	return &cloned
+}
+
+func filterBotsForAdminScope(adminUser *model.AdminUser, bots []*model.Bot) ([]*model.Bot, error) {
+	if adminUser == nil {
+		return bots, nil
+	}
+
+	access, err := model.ResolveAdminAccess(adminUser.ID)
+	if err != nil {
+		return nil, err
+	}
+	if access.ScopeMode != model.AdminScopeModeSelectedApps {
+		return bots, nil
+	}
+
+	allowedAppIDs := make(map[string]struct{}, len(access.AppScopeIDs))
+	for _, appID := range access.AppScopeIDs {
+		allowedAppIDs[appID] = struct{}{}
+	}
+
+	filteredBots := make([]*model.Bot, 0, len(bots))
+	for _, bot := range bots {
+		if _, ok := allowedAppIDs[bot.AppID]; ok {
+			filteredBots = append(filteredBots, bot)
+		}
+	}
+	return filteredBots, nil
+}
 
 // AdminCreateBot creates a new bot (admin only)
 func AdminCreateBot(c echo.Context) error {
@@ -28,6 +94,17 @@ func AdminCreateBot(c echo.Context) error {
 	}
 	if req.UserID == "" {
 		req.UserID = "admin"
+	}
+
+	adminUser := authmw.GetAdminUserFromContext(c)
+	if adminUser != nil {
+		allowed, err := model.AdminHasPermission(adminUser.ID, model.PermissionBotsCreate, req.AppID)
+		if err != nil {
+			return util.InternalError(c, "failed to resolve admin permissions")
+		}
+		if !allowed {
+			return util.Forbidden(c, "insufficient permissions")
+		}
 	}
 
 	bot := &model.Bot{
@@ -51,6 +128,17 @@ func AdminCreateBot(c echo.Context) error {
 	if err := model.CreateBot(bot); err != nil {
 		return util.InternalError(c, "failed to create bot")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.create",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+		Metadata: map[string]interface{}{
+			"slug": bot.Slug,
+		},
+	})
 
 	return util.Success(c, bot)
 }
@@ -61,7 +149,18 @@ func AdminListBots(c echo.Context) error {
 	if err != nil {
 		return util.InternalError(c, "failed to list bots")
 	}
-	return util.Success(c, bots)
+	adminUser := authmw.GetAdminUserFromContext(c)
+	bots, err = filterBotsForAdminScope(adminUser, bots)
+	if err != nil {
+		return util.InternalError(c, "failed to resolve admin access")
+	}
+
+	items := make([]*model.Bot, 0, len(bots))
+	for _, bot := range bots {
+		items = append(items, resolveAdminBotRuntimeStatus(bot))
+	}
+
+	return util.Success(c, items)
 }
 
 // AdminStartBot starts a bot by ID (admin only)
@@ -73,6 +172,17 @@ func AdminStartBot(c echo.Context) error {
 	}
 
 	if bot.Status == model.BotStatusRunning {
+		writeAuditEntry(c, auditservice.Entry{
+			AppID:       bot.AppID,
+			Action:      "bot.start",
+			TargetType:  "bot",
+			TargetID:    bot.ID,
+			TargetLabel: bot.Name,
+			Result:      model.AuditResultFailure,
+			Metadata: map[string]interface{}{
+				"reason": "bot is already running",
+			},
+		})
 		return util.BadRequest(c, "bot is already running")
 	}
 
@@ -110,6 +220,14 @@ func AdminStartBot(c echo.Context) error {
 
 	bot.Status = model.BotStatusStarting
 	bot.Endpoint = endpoint
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.start",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+	})
 	return util.Success(c, bot)
 }
 
@@ -122,6 +240,17 @@ func AdminStopBot(c echo.Context) error {
 	}
 
 	if bot.Status != model.BotStatusRunning {
+		writeAuditEntry(c, auditservice.Entry{
+			AppID:       bot.AppID,
+			Action:      "bot.stop",
+			TargetType:  "bot",
+			TargetID:    bot.ID,
+			TargetLabel: bot.Name,
+			Result:      model.AuditResultFailure,
+			Metadata: map[string]interface{}{
+				"reason": "bot is not running",
+			},
+		})
 		return util.BadRequest(c, "bot is not running")
 	}
 
@@ -139,6 +268,14 @@ func AdminStopBot(c echo.Context) error {
 
 	bot.Status = model.BotStatusStopped
 	bot.Endpoint = ""
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.stop",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+	})
 	return util.Success(c, bot)
 }
 
@@ -159,6 +296,14 @@ func AdminDeleteBot(c echo.Context) error {
 	if err := model.DeleteBot(bot.ID); err != nil {
 		return util.InternalError(c, "failed to delete bot")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.delete",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+	})
 
 	return util.Success(c, map[string]string{"message": "bot deleted"})
 }

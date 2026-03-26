@@ -6,11 +6,19 @@ import (
 	"sync"
 	"sync/atomic"
 
+	authmw "github.com/clawhost/clawhost/middleware"
 	"github.com/clawhost/clawhost/model"
+	auditservice "github.com/clawhost/clawhost/service/audit"
 	"github.com/clawhost/clawhost/service/k8s"
 	"github.com/clawhost/clawhost/util"
 	"github.com/labstack/echo/v4"
 	"github.com/spf13/viper"
+)
+
+var (
+	getDeploymentImageFn    = k8s.GetDeploymentImage
+	updateDeploymentImageFn = k8s.UpdateDeploymentImage
+	syncConfigToPodFn       = k8s.SyncConfigToPod
 )
 
 type UpgradeBotsRequest struct {
@@ -46,6 +54,17 @@ func UpgradeBot(c echo.Context) error {
 	}
 
 	if bot.Status != model.BotStatusRunning {
+		writeAuditEntry(c, auditservice.Entry{
+			AppID:       bot.AppID,
+			Action:      "bot.upgrade",
+			TargetType:  "bot",
+			TargetID:    bot.ID,
+			TargetLabel: bot.Name,
+			Result:      model.AuditResultFailure,
+			Metadata: map[string]interface{}{
+				"reason": "bot is not running",
+			},
+		})
 		return util.BadRequest(c, "bot is not running")
 	}
 
@@ -65,8 +84,21 @@ func UpgradeBot(c echo.Context) error {
 	ctx := context.Background()
 
 	// Check current image
-	currentImage, _ := k8s.GetDeploymentImage(ctx, bot.ID)
+	currentImage, _ := getDeploymentImageFn(ctx, bot.ID)
 	if currentImage == image {
+		writeAuditEntry(c, auditservice.Entry{
+			AppID:       bot.AppID,
+			Action:      "bot.upgrade",
+			TargetType:  "bot",
+			TargetID:    bot.ID,
+			TargetLabel: bot.Name,
+			Result:      model.AuditResultSuccess,
+			Metadata: map[string]interface{}{
+				"image":          image,
+				"previous_image": currentImage,
+				"status":         "skipped",
+			},
+		})
 		return util.Success(c, map[string]string{
 			"status":  "skipped",
 			"message": "already running target image",
@@ -74,17 +106,43 @@ func UpgradeBot(c echo.Context) error {
 		})
 	}
 
-	if err := k8s.UpdateDeploymentImage(ctx, bot.ID, image); err != nil {
+	if err := updateDeploymentImageFn(ctx, bot.ID, image); err != nil {
+		writeAuditEntry(c, auditservice.Entry{
+			AppID:       bot.AppID,
+			Action:      "bot.upgrade",
+			TargetType:  "bot",
+			TargetID:    bot.ID,
+			TargetLabel: bot.Name,
+			Result:      model.AuditResultFailure,
+			Metadata: map[string]interface{}{
+				"image":          image,
+				"previous_image": currentImage,
+				"reason":         err.Error(),
+			},
+		})
 		return util.InternalError(c, "failed to upgrade: "+err.Error())
 	}
 
 	// Sync config to new pod after image upgrade (applies latest gateway settings)
 	go func() {
-		if err := k8s.SyncConfigToPod(context.Background(), bot.ID); err != nil {
+		if err := syncConfigToPodFn(context.Background(), bot.ID); err != nil {
 			fmt.Printf("[Upgrade] failed to sync config for bot %s: %v\n", bot.ID, err)
 		}
 	}()
 
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.upgrade",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+		Metadata: map[string]interface{}{
+			"image":          image,
+			"previous_image": currentImage,
+			"status":         "upgraded",
+		},
+	})
 	return util.Success(c, map[string]string{
 		"status":         "upgraded",
 		"image":          image,
@@ -112,8 +170,25 @@ func UpgradeAllBots(c echo.Context) error {
 	if err != nil {
 		return util.InternalError(c, "failed to list running bots")
 	}
+	adminUser := authmw.GetAdminUserFromContext(c)
+	bots, err = filterBotsForAdminScope(adminUser, bots)
+	if err != nil {
+		return util.InternalError(c, "failed to resolve admin access")
+	}
 
 	if len(bots) == 0 {
+		writeAuditEntry(c, auditservice.Entry{
+			Action:     "bot.upgrade_all",
+			TargetType: "bot",
+			TargetID:   "*",
+			Result:     model.AuditResultSuccess,
+			Metadata: map[string]interface{}{
+				"image":   image,
+				"total":   0,
+				"status":  "skipped",
+				"message": "no running bots to upgrade",
+			},
+		})
 		return util.Success(c, &UpgradeBotsResponse{
 			Image: image,
 			Total: 0,
@@ -138,7 +213,7 @@ func UpgradeAllBots(c echo.Context) error {
 			result := UpgradeResult{BotID: b.ID}
 
 			// Check current image
-			currentImage, err := k8s.GetDeploymentImage(ctx, b.ID)
+			currentImage, err := getDeploymentImageFn(ctx, b.ID)
 			if err != nil {
 				// Deployment might not exist, skip
 				skipped.Add(1)
@@ -156,7 +231,7 @@ func UpgradeAllBots(c echo.Context) error {
 				return
 			}
 
-			if err := k8s.UpdateDeploymentImage(ctx, b.ID, image); err != nil {
+			if err := updateDeploymentImageFn(ctx, b.ID, image); err != nil {
 				failed.Add(1)
 				result.Status = "failed"
 				result.Message = err.Error()
@@ -165,7 +240,7 @@ func UpgradeAllBots(c echo.Context) error {
 				result.Status = "upgraded"
 				// Sync config to new pod after image upgrade
 				go func(botID string) {
-					if err := k8s.SyncConfigToPod(context.Background(), botID); err != nil {
+					if err := syncConfigToPodFn(context.Background(), botID); err != nil {
 						fmt.Printf("[Upgrade] failed to sync config for bot %s: %v\n", botID, err)
 					}
 				}(b.ID)
@@ -176,6 +251,23 @@ func UpgradeAllBots(c echo.Context) error {
 
 	wg.Wait()
 
+	auditResult := model.AuditResultSuccess
+	if failed.Load() > 0 && upgraded.Load() == 0 {
+		auditResult = model.AuditResultFailure
+	}
+	writeAuditEntry(c, auditservice.Entry{
+		Action:     "bot.upgrade_all",
+		TargetType: "bot",
+		TargetID:   "*",
+		Result:     auditResult,
+		Metadata: map[string]interface{}{
+			"image":    image,
+			"total":    len(bots),
+			"upgraded": upgraded.Load(),
+			"failed":   failed.Load(),
+			"skipped":  skipped.Load(),
+		},
+	})
 	return util.Success(c, &UpgradeBotsResponse{
 		Image:    image,
 		Total:    len(bots),

@@ -9,72 +9,116 @@ import {
   type ReactNode,
 } from "react";
 import {
-  getStoredToken,
-  setToken,
-  clearToken,
-  verifyToken,
+  type AdminSessionPayload,
+  type AdminUser,
+  clearAdminSession,
+  getCurrentAdmin,
+  hasStoredSessionToken,
+  loginAdmin,
+  logoutAdmin,
 } from "@/lib/api";
 
 interface AuthContextType {
-  token: string;
+  admin: AdminUser | null;
   isAuthed: boolean;
   verifying: boolean;
-  login: (token: string) => Promise<boolean>;
-  logout: () => void;
+  expiresAt: string | null;
+  hasPermission: (permission: string) => boolean;
+  roleSummary: string;
+  login: (email: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
-  token: "",
+  admin: null,
   isAuthed: false,
   verifying: true,
+  expiresAt: null,
+  hasPermission: () => false,
+  roleSummary: "",
   login: async () => false,
-  logout: () => {},
+  logout: async () => {},
 });
 
+function applySessionPayload(
+  payload: AdminSessionPayload,
+  setAdmin: (admin: AdminUser | null) => void,
+  setExpiresAt: (expiresAt: string | null) => void,
+  setIsAuthed: (value: boolean) => void
+) {
+  setAdmin(payload.admin);
+  setExpiresAt(payload.expires_at);
+  setIsAuthed(true);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setTokenState] = useState("");
+  const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
   const [verifying, setVerifying] = useState(true);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
-  // Verify stored token on mount
   useEffect(() => {
-    const stored = getStoredToken();
-    if (!stored) {
+    if (!hasStoredSessionToken()) {
       setVerifying(false);
       return;
     }
-    setTokenState(stored);
-    verifyToken(stored).then((valid) => {
-      if (valid) {
-        setIsAuthed(true);
-      } else {
-        clearToken();
-        setTokenState("");
+
+    getCurrentAdmin()
+      .then((res) => {
+        applySessionPayload(res.data, setAdmin, setExpiresAt, setIsAuthed);
+      })
+      .catch(() => {
+        clearAdminSession();
+        setAdmin(null);
+        setExpiresAt(null);
+        setIsAuthed(false);
+      })
+      .finally(() => {
+        setVerifying(false);
+      });
+  }, []);
+
+  const login = useCallback(
+    async (email: string, password: string): Promise<boolean> => {
+      try {
+        const res = await loginAdmin(email, password);
+        applySessionPayload(res.data, setAdmin, setExpiresAt, setIsAuthed);
+        return true;
+      } catch {
+        return false;
       }
-      setVerifying(false);
-    });
-  }, []);
+    },
+    []
+  );
 
-  const login = useCallback(async (t: string): Promise<boolean> => {
-    const valid = await verifyToken(t);
-    if (valid) {
-      setToken(t);
-      setTokenState(t);
-      setIsAuthed(true);
-      return true;
-    }
-    return false;
-  }, []);
-
-  const logout = useCallback(() => {
-    clearToken();
-    setTokenState("");
+  const logout = useCallback(async () => {
+    await logoutAdmin();
+    setAdmin(null);
+    setExpiresAt(null);
     setIsAuthed(false);
   }, []);
 
+  const hasPermission = useCallback(
+    (permission: string) => admin?.permissions.includes(permission) ?? false,
+    [admin]
+  );
+
+  const roleSummary = admin?.roles.length
+    ? admin.roles.map((role) => role.replaceAll("_", " ")).join(", ")
+    : "";
+
   return (
     <AuthContext.Provider
-      value={{ token, isAuthed, verifying, login, logout }}
+      value={{
+        admin,
+        isAuthed,
+        verifying,
+        expiresAt,
+        hasPermission,
+        roleSummary,
+        login,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

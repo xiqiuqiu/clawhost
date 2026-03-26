@@ -1,7 +1,9 @@
 package v1
 
 import (
+	"github.com/clawhost/clawhost/middleware"
 	"github.com/clawhost/clawhost/model"
+	auditservice "github.com/clawhost/clawhost/service/audit"
 	"github.com/clawhost/clawhost/util"
 	"github.com/labstack/echo/v4"
 )
@@ -24,6 +26,17 @@ type UpdateAppRequest struct {
 }
 
 func CreateApp(c echo.Context) error {
+	adminUser := middleware.GetAdminUserFromContext(c)
+	if adminUser != nil {
+		allowed, err := model.AdminHasPermission(adminUser.ID, model.PermissionAppsCreate, "")
+		if err != nil {
+			return util.InternalError(c, "failed to resolve admin permissions")
+		}
+		if !allowed {
+			return util.Forbidden(c, "insufficient permissions")
+		}
+	}
+
 	var req CreateAppRequest
 	if err := c.Bind(&req); err != nil {
 		return util.BadRequest(c, "invalid request body")
@@ -44,6 +57,17 @@ func CreateApp(c echo.Context) error {
 	if err := model.CreateApp(app); err != nil {
 		return util.InternalError(c, "failed to create app")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       app.ID,
+		Action:      "app.create",
+		TargetType:  "app",
+		TargetID:    app.ID,
+		TargetLabel: app.Name,
+		Result:      model.AuditResultSuccess,
+		Metadata: map[string]interface{}{
+			"owner_email": adminSafeOwnerEmail(app.OwnerEmail),
+		},
+	})
 
 	return util.Success(c, app)
 }
@@ -52,6 +76,26 @@ func ListApps(c echo.Context) error {
 	apps, err := model.ListApps()
 	if err != nil {
 		return util.InternalError(c, "failed to list apps")
+	}
+	adminUser := middleware.GetAdminUserFromContext(c)
+	if adminUser != nil {
+		access, err := model.ResolveAdminAccess(adminUser.ID)
+		if err != nil {
+			return util.InternalError(c, "failed to resolve admin access")
+		}
+		if access.ScopeMode == model.AdminScopeModeSelectedApps {
+			allowedAppIDs := make(map[string]struct{}, len(access.AppScopeIDs))
+			for _, appID := range access.AppScopeIDs {
+				allowedAppIDs[appID] = struct{}{}
+			}
+			filteredApps := make([]*model.App, 0, len(apps))
+			for _, app := range apps {
+				if _, ok := allowedAppIDs[app.ID]; ok {
+					filteredApps = append(filteredApps, app)
+				}
+			}
+			apps = filteredApps
+		}
 	}
 
 	return util.Success(c, apps)
@@ -112,6 +156,14 @@ func UpdateApp(c echo.Context) error {
 	if err := model.UpdateApp(app); err != nil {
 		return util.InternalError(c, "failed to update app")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       app.ID,
+		Action:      "app.update",
+		TargetType:  "app",
+		TargetID:    app.ID,
+		TargetLabel: app.Name,
+		Result:      model.AuditResultSuccess,
+	})
 
 	return util.Success(c, app)
 }
@@ -130,6 +182,14 @@ func DeleteApp(c echo.Context) error {
 	if err := model.DeleteApp(id); err != nil {
 		return util.InternalError(c, "failed to delete app")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       id,
+		Action:      "app.delete",
+		TargetType:  "app",
+		TargetID:    id,
+		TargetLabel: "",
+		Result:      model.AuditResultSuccess,
+	})
 
 	return util.Success(c, map[string]string{"message": "app deleted"})
 }
@@ -149,6 +209,17 @@ func ResetAppToken(c echo.Context) error {
 	if err != nil {
 		return util.InternalError(c, "failed to reset token")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       id,
+		Action:      "app.reset_token",
+		TargetType:  "app",
+		TargetID:    id,
+		Result:      model.AuditResultSuccess,
+	})
 
 	return util.Success(c, map[string]string{"api_token": newToken})
+}
+
+func adminSafeOwnerEmail(email string) string {
+	return email
 }

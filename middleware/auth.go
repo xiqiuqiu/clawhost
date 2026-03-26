@@ -15,6 +15,10 @@ const (
 	ContextKeyApp = "authenticated_app"
 	// ContextKeyBot is the key used to store the authorized bot in context
 	ContextKeyBot = "authorized_bot"
+	// ContextKeyAdminUser is the key used to store the authenticated admin user in context
+	ContextKeyAdminUser = "authenticated_admin_user"
+	// ContextKeyAdminSession is the key used to store the authenticated admin session in context
+	ContextKeyAdminSession = "authenticated_admin_session"
 )
 
 // BearerAuth returns a middleware that validates Bearer token against the apps table
@@ -112,6 +116,22 @@ func GetBotFromContext(c echo.Context) *model.Bot {
 	return bot
 }
 
+func GetAdminUserFromContext(c echo.Context) *model.AdminUser {
+	adminUser, ok := c.Get(ContextKeyAdminUser).(*model.AdminUser)
+	if !ok {
+		return nil
+	}
+	return adminUser
+}
+
+func GetAdminSessionFromContext(c echo.Context) *model.AdminSession {
+	adminSession, ok := c.Get(ContextKeyAdminSession).(*model.AdminSession)
+	if !ok {
+		return nil
+	}
+	return adminSession
+}
+
 // AdminAuth returns a middleware that validates admin token from config
 // This is used for app management endpoints
 func AdminAuth() echo.MiddlewareFunc {
@@ -137,6 +157,43 @@ func AdminAuth() echo.MiddlewareFunc {
 				return util.Unauthorized(c, "invalid admin token")
 			}
 
+			return next(c)
+		}
+	}
+}
+
+func AdminSessionAuth() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			authHeader := c.Request().Header.Get("Authorization")
+			if authHeader == "" {
+				return util.Unauthorized(c, "missing authorization header")
+			}
+
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+				return util.Unauthorized(c, "invalid authorization format, expected: Bearer <token>")
+			}
+
+			session, err := model.GetActiveAdminSessionByToken(parts[1])
+			if err != nil {
+				return util.Unauthorized(c, "invalid or expired admin session")
+			}
+
+			adminUser, err := model.GetAdminUserByID(session.AdminUserID)
+			if err != nil {
+				return util.Unauthorized(c, "admin user not found")
+			}
+			if adminUser.Status != model.AdminUserStatusActive {
+				return util.Forbidden(c, "admin user is disabled")
+			}
+
+			if err := model.TouchAdminSession(session.ID); err != nil {
+				return util.InternalError(c, "failed to update admin session")
+			}
+
+			c.Set(ContextKeyAdminUser, adminUser)
+			c.Set(ContextKeyAdminSession, session)
 			return next(c)
 		}
 	}

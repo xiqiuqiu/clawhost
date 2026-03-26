@@ -11,6 +11,7 @@ import (
 	v1 "github.com/clawhost/clawhost/handler/api/v1"
 	"github.com/clawhost/clawhost/handler/proxy"
 	authmw "github.com/clawhost/clawhost/middleware"
+	"github.com/clawhost/clawhost/model"
 	"github.com/clawhost/clawhost/service/k8s"
 	"github.com/clawhost/clawhost/web"
 	"github.com/labstack/echo/v4"
@@ -153,13 +154,23 @@ func startServer() {
 	}
 
 	// Admin API routes: /bot/api/v1/admin/* (requires admin token)
-	admin := e.Group("/bot/api/v1/admin")
-	admin.Use(authmw.AdminAuth())
+	adminPublic := e.Group("/bot/api/v1/admin")
 	{
-		// Token verification
-		admin.GET("/verify", func(c echo.Context) error {
-			return c.JSON(200, map[string]interface{}{"code": 0, "message": "success"})
-		})
+		adminPublic.POST("/bootstrap", v1.BootstrapAdmin)
+		adminPublic.POST("/login", v1.AdminLogin)
+	}
+
+	admin := e.Group("/bot/api/v1/admin")
+	admin.Use(authmw.AdminSessionAuth())
+	{
+		admin.POST("/logout", v1.AdminLogout)
+		admin.GET("/me", v1.GetCurrentAdmin)
+		admin.GET("/roles", v1.ListAdminRolesHandler, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.GET("/permissions", v1.ListAdminPermissionsHandler, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.PUT("/roles/:key/permissions", v1.UpdateAdminRolePermissions, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.GET("/admin-users", v1.ListAdminUsers, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.POST("/admin-users", v1.CreateAdminManagedUser, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.PUT("/admin-users/:id", v1.UpdateAdminManagedUser, authmw.RequirePermission(model.PermissionAdminsManage))
 
 		// Global config (for admin UI)
 		admin.GET("/config", func(c echo.Context) error {
@@ -174,25 +185,26 @@ func startServer() {
 
 		// App management
 		admin.POST("/apps", v1.CreateApp)
-		admin.GET("/apps", v1.ListApps)
-		admin.GET("/apps/:id", v1.GetApp)
-		admin.PUT("/apps/:id", v1.UpdateApp)
-		admin.DELETE("/apps/:id", v1.DeleteApp)
-		admin.POST("/apps/:id/reset-token", v1.ResetAppToken)
+		admin.GET("/apps", v1.ListApps, authmw.RequirePermission(model.PermissionAppsRead))
+		admin.GET("/apps/:id", v1.GetApp, authmw.RequireAppPermission(model.PermissionAppsRead, resolveAppIDFromParam))
+		admin.PUT("/apps/:id", v1.UpdateApp, authmw.RequireAppPermission(model.PermissionAppsUpdate, resolveAppIDFromParam))
+		admin.DELETE("/apps/:id", v1.DeleteApp, authmw.RequireAppPermission(model.PermissionAppsDelete, resolveAppIDFromParam))
+		admin.POST("/apps/:id/reset-token", v1.ResetAppToken, authmw.RequireAppPermission(model.PermissionAppsTokenReset, resolveAppIDFromParam))
+		admin.GET("/audit", v1.ListAdminAuditLogs, authmw.RequirePermission(model.PermissionAuditRead))
 
 		// Bot management (admin)
 		admin.POST("/bots", v1.AdminCreateBot)
-		admin.GET("/bots", v1.AdminListBots)
-		admin.POST("/bots/:id/start", v1.AdminStartBot)
-		admin.POST("/bots/:id/stop", v1.AdminStopBot)
-		admin.DELETE("/bots/:id", v1.AdminDeleteBot)
+		admin.GET("/bots", v1.AdminListBots, authmw.RequirePermission(model.PermissionBotsRead))
+		admin.POST("/bots/:id/start", v1.AdminStartBot, authmw.RequireAppPermission(model.PermissionBotsStart, resolveBotAppIDFromParam))
+		admin.POST("/bots/:id/stop", v1.AdminStopBot, authmw.RequireAppPermission(model.PermissionBotsStop, resolveBotAppIDFromParam))
+		admin.DELETE("/bots/:id", v1.AdminDeleteBot, authmw.RequireAppPermission(model.PermissionBotsDelete, resolveBotAppIDFromParam))
 
 		// Bot upgrade management
-		admin.POST("/bots/upgrade", v1.UpgradeAllBots)
-		admin.POST("/bots/:id/upgrade", v1.UpgradeBot)
+		admin.POST("/bots/upgrade", v1.UpgradeAllBots, authmw.RequirePermission(model.PermissionBotsUpgrade))
+		admin.POST("/bots/:id/upgrade", v1.UpgradeBot, authmw.RequireAppPermission(model.PermissionBotsUpgrade, resolveBotAppIDFromParam))
 
 		// Bot restart management (full pod spec rebuild)
-		admin.POST("/bots/restart", v1.RestartAllBots)
+		admin.POST("/bots/restart", v1.RestartAllBots, authmw.RequirePermission(model.PermissionBotsUpgrade))
 	}
 
 	// Health check
@@ -224,4 +236,25 @@ func startServer() {
 	log.Printf("Starting server on port %d", port)
 	log.Printf("Admin UI: http://localhost:%d/admin", port)
 	e.Logger.Fatal(e.Start(fmt.Sprintf(":%d", port)))
+}
+
+func resolveAppIDFromParam(c echo.Context) (string, error) {
+	appID := c.Param("id")
+	if appID == "" {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "app id is required")
+	}
+	return appID, nil
+}
+
+func resolveBotAppIDFromParam(c echo.Context) (string, error) {
+	botID := c.Param("id")
+	if botID == "" {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+
+	bot, err := model.GetBotByID(botID)
+	if err != nil {
+		return "", echo.NewHTTPError(http.StatusNotFound, "bot not found")
+	}
+	return bot.AppID, nil
 }

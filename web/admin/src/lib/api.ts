@@ -1,45 +1,102 @@
 const API_BASE = "/bot/api/v1/admin";
+const SESSION_STORAGE_KEY = "admin_session_token";
 
-function getToken(): string {
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  status: string;
+  is_bootstrap: boolean;
+  roles: string[];
+  permissions: string[];
+  memberships: AdminMembership[];
+  scope_mode: string;
+  app_scope_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminMembership {
+  role: string;
+  scope_type: string;
+  scope_id?: string;
+}
+
+export interface AdminSessionPayload {
+  admin: AdminUser;
+  expires_at: string;
+}
+
+export interface ManagedAdminUser extends AdminUser {}
+
+export interface AdminRole {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  scope_type: string;
+  is_system: boolean;
+  permissions: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminPermission {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  resource_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuditLog {
+  id: string;
+  actor_admin_id: string;
+  actor_email: string;
+  app_id: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  result: string;
+  source_ip: string;
+  user_agent: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+function getStoredSessionToken(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("admin_token") || "";
+  return localStorage.getItem(SESSION_STORAGE_KEY) || "";
 }
 
-export function setToken(token: string) {
-  localStorage.setItem("admin_token", token);
+function setStoredSessionToken(token: string) {
+  localStorage.setItem(SESSION_STORAGE_KEY, token);
 }
 
-export function getStoredToken(): string {
-  return getToken();
-}
-
-export function clearToken() {
-  localStorage.removeItem("admin_token");
-}
-
-export async function verifyToken(token: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE}/verify`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+function clearStoredSessionToken() {
+  localStorage.removeItem(SESSION_STORAGE_KEY);
 }
 
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<{ code: number; message: string; data: T }> {
-  const token = getToken();
+  const token = getStoredSessionToken();
+  const headers = new Headers(options.headers);
+  if (!headers.has("Content-Type") && options.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...options.headers,
-    },
+    headers,
   });
 
   const json = await res.json();
@@ -47,6 +104,119 @@ async function request<T>(
     throw new Error(json.message || `Request failed: ${res.status}`);
   }
   return json;
+}
+
+export async function loginAdmin(email: string, password: string) {
+  const res = await request<
+    Omit<AdminSessionPayload, "admin"> & {
+      admin: Omit<AdminUser, "roles" | "permissions" | "memberships">;
+      roles: string[];
+      permissions: string[];
+      memberships: AdminMembership[];
+      session_token: string;
+    }
+  >(
+    "/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }
+  );
+  const normalized = normalizeAdminSessionPayload(res.data);
+  setStoredSessionToken(res.data.session_token);
+  return {
+    ...res,
+    data: {
+      ...normalized,
+      session_token: res.data.session_token,
+    },
+  };
+}
+
+export async function logoutAdmin() {
+  try {
+    await request<{ revoked: boolean }>("/logout", {
+      method: "POST",
+    });
+  } finally {
+    clearStoredSessionToken();
+  }
+}
+
+export async function getCurrentAdmin() {
+  const res = await request<
+    Omit<AdminSessionPayload, "admin"> & {
+      admin: Omit<AdminUser, "roles" | "permissions" | "memberships">;
+      roles: string[];
+      permissions: string[];
+      memberships: AdminMembership[];
+    }
+  >("/me");
+  return {
+    ...res,
+    data: normalizeAdminSessionPayload(res.data),
+  };
+}
+
+export async function listManagedAdminUsers() {
+  return request<ManagedAdminUser[]>("/admin-users");
+}
+
+export async function createManagedAdminUser(data: {
+  email: string;
+  name: string;
+  password: string;
+  role: string;
+  scope_mode?: string;
+  app_scope_ids?: string[];
+}) {
+  return request<ManagedAdminUser>("/admin-users", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateManagedAdminUser(
+  id: string,
+  data: {
+    name?: string;
+    status?: string;
+    role?: string;
+    password?: string;
+    scope_mode?: string;
+    app_scope_ids?: string[];
+  }
+) {
+  return request<ManagedAdminUser>(`/admin-users/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function listAdminRoles() {
+  return request<AdminRole[]>("/roles");
+}
+
+export async function listAdminPermissions() {
+  return request<AdminPermission[]>("/permissions");
+}
+
+export async function updateAdminRolePermissions(
+  key: string,
+  permissions: string[]
+) {
+  return request<AdminRole>(`/roles/${key}/permissions`, {
+    method: "PUT",
+    body: JSON.stringify({ permissions }),
+  });
+}
+
+export function hasStoredSessionToken(): boolean {
+  return Boolean(getStoredSessionToken());
+}
+
+export function clearAdminSession() {
+  clearStoredSessionToken();
 }
 
 // App types
@@ -174,4 +344,42 @@ export async function restartAllBots() {
 // Config APIs
 export async function getAdminConfig() {
   return request<{ bot_domain_template: string }>("/config");
+}
+
+export async function listAuditLogs(filters?: {
+  actor?: string;
+  app_id?: string;
+  action?: string;
+  result?: string;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (filters?.actor) params.set("actor", filters.actor);
+  if (filters?.app_id) params.set("app_id", filters.app_id);
+  if (filters?.action) params.set("action", filters.action);
+  if (filters?.result) params.set("result", filters.result);
+  if (filters?.limit) params.set("limit", String(filters.limit));
+
+  const query = params.toString();
+  return request<AuditLog[]>(`/audit${query ? `?${query}` : ""}`);
+}
+
+function normalizeAdminSessionPayload(data: {
+  admin: Omit<AdminUser, "roles" | "permissions" | "memberships">;
+  roles?: string[];
+  permissions?: string[];
+  memberships?: AdminMembership[];
+  expires_at: string;
+}) {
+  return {
+    admin: {
+      ...data.admin,
+      roles: data.roles || [],
+      permissions: data.permissions || [],
+      memberships: data.memberships || [],
+      scope_mode: data.admin.scope_mode || "platform",
+      app_scope_ids: data.admin.app_scope_ids || [],
+    },
+    expires_at: data.expires_at,
+  };
 }
