@@ -58,6 +58,13 @@ func BootstrapAdmin(c echo.Context) error {
 	if err := model.CreateAdminUser(adminUser); err != nil {
 		return util.InternalError(c, "failed to create admin user")
 	}
+	if err := model.CreateAdminMembership(&model.AdminMembership{
+		AdminUserID: adminUser.ID,
+		Role:        model.AdminRolePlatformAdmin,
+		ScopeType:   model.AdminScopePlatform,
+	}); err != nil {
+		return util.InternalError(c, "failed to create bootstrap admin membership")
+	}
 
 	return c.JSON(http.StatusCreated, util.Response{
 		Code:    0,

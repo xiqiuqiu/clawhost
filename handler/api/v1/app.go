@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"github.com/clawhost/clawhost/middleware"
 	"github.com/clawhost/clawhost/model"
 	"github.com/clawhost/clawhost/util"
 	"github.com/labstack/echo/v4"
@@ -24,6 +25,17 @@ type UpdateAppRequest struct {
 }
 
 func CreateApp(c echo.Context) error {
+	adminUser := middleware.GetAdminUserFromContext(c)
+	if adminUser != nil {
+		allowed, err := model.AdminHasPermission(adminUser.ID, model.PermissionAppsCreate, "")
+		if err != nil {
+			return util.InternalError(c, "failed to resolve admin permissions")
+		}
+		if !allowed {
+			return util.Forbidden(c, "insufficient permissions")
+		}
+	}
+
 	var req CreateAppRequest
 	if err := c.Bind(&req); err != nil {
 		return util.BadRequest(c, "invalid request body")

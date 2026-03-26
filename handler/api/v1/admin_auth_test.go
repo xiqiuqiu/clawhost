@@ -42,7 +42,7 @@ func setupAdminAuthTestDB(t *testing.T) *gorm.DB {
 func TestBootstrapAdmin(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
 	viper.Set("api.admin_token", "bootstrap-token")
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}); err != nil {
+	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}, &model.AdminMembership{}); err != nil {
 		t.Fatalf("migrate admin auth models: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestBootstrapAdmin(t *testing.T) {
 
 func TestAdminLogin(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}); err != nil {
+	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}, &model.AdminMembership{}); err != nil {
 		t.Fatalf("migrate admin auth models: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestAdminLogin(t *testing.T) {
 
 func TestAdminLogout(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}); err != nil {
+	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}, &model.AdminMembership{}); err != nil {
 		t.Fatalf("migrate admin auth models: %v", err)
 	}
 
@@ -180,7 +180,7 @@ func TestAdminLogout(t *testing.T) {
 
 func TestVerifyAdminSession(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}); err != nil {
+	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}, &model.AdminMembership{}); err != nil {
 		t.Fatalf("migrate admin auth models: %v", err)
 	}
 

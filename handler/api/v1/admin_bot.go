@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 
+	authmw "github.com/clawhost/clawhost/middleware"
 	"github.com/clawhost/clawhost/model"
 	"github.com/clawhost/clawhost/service/k8s"
 	"github.com/clawhost/clawhost/util"
@@ -28,6 +29,17 @@ func AdminCreateBot(c echo.Context) error {
 	}
 	if req.UserID == "" {
 		req.UserID = "admin"
+	}
+
+	adminUser := authmw.GetAdminUserFromContext(c)
+	if adminUser != nil {
+		allowed, err := model.AdminHasPermission(adminUser.ID, model.PermissionBotsCreate, req.AppID)
+		if err != nil {
+			return util.InternalError(c, "failed to resolve admin permissions")
+		}
+		if !allowed {
+			return util.Forbidden(c, "insufficient permissions")
+		}
 	}
 
 	bot := &model.Bot{

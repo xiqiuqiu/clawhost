@@ -1,45 +1,50 @@
 const API_BASE = "/bot/api/v1/admin";
+const SESSION_STORAGE_KEY = "admin_session_token";
 
-function getToken(): string {
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  status: string;
+  is_bootstrap: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminSessionPayload {
+  admin: AdminUser;
+  expires_at: string;
+}
+
+function getStoredSessionToken(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("admin_token") || "";
+  return localStorage.getItem(SESSION_STORAGE_KEY) || "";
 }
 
-export function setToken(token: string) {
-  localStorage.setItem("admin_token", token);
+function setStoredSessionToken(token: string) {
+  localStorage.setItem(SESSION_STORAGE_KEY, token);
 }
 
-export function getStoredToken(): string {
-  return getToken();
-}
-
-export function clearToken() {
-  localStorage.removeItem("admin_token");
-}
-
-export async function verifyToken(token: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE}/verify`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+function clearStoredSessionToken() {
+  localStorage.removeItem(SESSION_STORAGE_KEY);
 }
 
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<{ code: number; message: string; data: T }> {
-  const token = getToken();
+  const token = getStoredSessionToken();
+  const headers = new Headers(options.headers);
+  if (!headers.has("Content-Type") && options.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...options.headers,
-    },
+    headers,
   });
 
   const json = await res.json();
@@ -47,6 +52,41 @@ async function request<T>(
     throw new Error(json.message || `Request failed: ${res.status}`);
   }
   return json;
+}
+
+export async function loginAdmin(email: string, password: string) {
+  const res = await request<AdminSessionPayload & { session_token: string }>(
+    "/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }
+  );
+
+  setStoredSessionToken(res.data.session_token);
+  return res;
+}
+
+export async function logoutAdmin() {
+  try {
+    await request<{ revoked: boolean }>("/logout", {
+      method: "POST",
+    });
+  } finally {
+    clearStoredSessionToken();
+  }
+}
+
+export async function getCurrentAdmin() {
+  return request<AdminSessionPayload>("/me");
+}
+
+export function hasStoredSessionToken(): boolean {
+  return Boolean(getStoredSessionToken());
+}
+
+export function clearAdminSession() {
+  clearStoredSessionToken();
 }
 
 // App types
