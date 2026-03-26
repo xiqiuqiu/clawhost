@@ -77,6 +77,26 @@ func ListApps(c echo.Context) error {
 	if err != nil {
 		return util.InternalError(c, "failed to list apps")
 	}
+	adminUser := middleware.GetAdminUserFromContext(c)
+	if adminUser != nil {
+		access, err := model.ResolveAdminAccess(adminUser.ID)
+		if err != nil {
+			return util.InternalError(c, "failed to resolve admin access")
+		}
+		if access.ScopeMode == model.AdminScopeModeSelectedApps {
+			allowedAppIDs := make(map[string]struct{}, len(access.AppScopeIDs))
+			for _, appID := range access.AppScopeIDs {
+				allowedAppIDs[appID] = struct{}{}
+			}
+			filteredApps := make([]*model.App, 0, len(apps))
+			for _, app := range apps {
+				if _, ok := allowedAppIDs[app.ID]; ok {
+					filteredApps = append(filteredApps, app)
+				}
+			}
+			apps = filteredApps
+		}
+	}
 
 	return util.Success(c, apps)
 }

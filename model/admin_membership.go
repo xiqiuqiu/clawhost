@@ -139,6 +139,9 @@ func AdminHasPermission(adminUserID, permission, appID string) (bool, error) {
 		if membership.ScopeType == AdminScopePlatform {
 			return true, nil
 		}
+		if membership.ScopeType == AdminScopeApp && appID == "" && supportsScopedRead(permission) {
+			return true, nil
+		}
 		if membership.ScopeType == AdminScopeApp && appID != "" && membership.ScopeID == appID {
 			return true, nil
 		}
@@ -191,4 +194,13 @@ func ResolveAdminAuditAccess(adminUserID string) (*AdminAuditAccess, error) {
 	}
 
 	return access, nil
+}
+
+func supportsScopedRead(permission string) bool {
+	switch permission {
+	case PermissionAppsRead, PermissionBotsRead, PermissionAuditRead:
+		return true
+	default:
+		return false
+	}
 }
