@@ -23,12 +23,12 @@ func ListAdminAuditLogs(c echo.Context) error {
 		return util.Unauthorized(c, "admin session not found")
 	}
 
-	allowed, err := model.AdminHasPermission(adminUser.ID, model.PermissionAuditRead, "")
+	auditAccess, err := model.ResolveAdminAuditAccess(adminUser.ID)
 	if err != nil {
-		return util.InternalError(c, "failed to resolve admin permissions")
+		return util.InternalError(c, "failed to resolve audit access")
 	}
-	if !allowed {
-		return util.Forbidden(c, "insufficient permissions")
+	if !auditAccess.CanReadAll && len(auditAccess.AppIDs) == 0 {
+		return util.Forbidden(c, "insufficient audit scope")
 	}
 
 	filter := model.AuditLogFilter{
@@ -56,6 +56,22 @@ func ListAdminAuditLogs(c echo.Context) error {
 			return util.BadRequest(c, "invalid date_to")
 		}
 		filter.DateTo = &parsed
+	}
+	if !auditAccess.CanReadAll {
+		if filter.AppID != "" {
+			allowedApp := false
+			for _, appID := range auditAccess.AppIDs {
+				if appID == filter.AppID {
+					allowedApp = true
+					break
+				}
+			}
+			if !allowedApp {
+				return util.Forbidden(c, "insufficient audit scope")
+			}
+		} else {
+			filter.AppIDs = auditAccess.AppIDs
+		}
 	}
 
 	logs, err := model.ListAuditLogs(filter)

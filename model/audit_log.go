@@ -34,6 +34,7 @@ type AuditLog struct {
 type AuditLogFilter struct {
 	Actor    string
 	AppID    string
+	AppIDs   []string
 	Action   string
 	Result   string
 	DateFrom *time.Time
@@ -68,6 +69,8 @@ func ListAuditLogs(filter AuditLogFilter) ([]*AuditLog, error) {
 	}
 	if filter.AppID != "" {
 		query = query.Where("app_id = ?", filter.AppID)
+	} else if len(filter.AppIDs) > 0 {
+		query = query.Where("app_id IN ?", filter.AppIDs)
 	}
 	if filter.Action != "" {
 		query = query.Where("action = ?", filter.Action)

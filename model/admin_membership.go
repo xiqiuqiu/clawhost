@@ -61,3 +61,40 @@ func AdminHasPermission(adminUserID, permission, appID string) (bool, error) {
 
 	return false, nil
 }
+
+type AdminAuditAccess struct {
+	CanReadAll bool
+	AppIDs     []string
+}
+
+func ResolveAdminAuditAccess(adminUserID string) (*AdminAuditAccess, error) {
+	memberships, err := ListAdminMembershipsByUser(adminUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	access := &AdminAuditAccess{
+		AppIDs: []string{},
+	}
+	appIDSet := make(map[string]struct{})
+
+	for _, membership := range memberships {
+		if !RoleHasPermission(membership.Role, PermissionAuditRead) {
+			continue
+		}
+		if membership.Role == AdminRolePlatformAdmin && membership.ScopeType == AdminScopePlatform {
+			access.CanReadAll = true
+			access.AppIDs = nil
+			return access, nil
+		}
+		if membership.ScopeType == AdminScopeApp && membership.ScopeID != "" {
+			if _, ok := appIDSet[membership.ScopeID]; ok {
+				continue
+			}
+			appIDSet[membership.ScopeID] = struct{}{}
+			access.AppIDs = append(access.AppIDs, membership.ScopeID)
+		}
+	}
+
+	return access, nil
+}

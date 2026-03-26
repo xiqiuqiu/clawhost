@@ -9,6 +9,9 @@ func TestRolePermissions(t *testing.T) {
 	if RoleHasPermission(AdminRoleViewer, PermissionAppsDelete) {
 		t.Fatal("did not expect viewer to delete apps")
 	}
+	if RoleHasPermission(AdminRoleViewer, PermissionAuditRead) {
+		t.Fatal("did not expect viewer to read audit logs")
+	}
 	if !RoleHasPermission(AdminRoleOperator, PermissionBotsStop) {
 		t.Fatal("expected operator to stop bots")
 	}

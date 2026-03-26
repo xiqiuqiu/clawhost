@@ -54,6 +54,7 @@ var rolePermissions = map[string]map[string]bool{
 		PermissionBotsStop:       true,
 		PermissionBotsDelete:     true,
 		PermissionBotsUpgrade:    true,
+		PermissionAuditRead:      true,
 	},
 	AdminRoleOperator: {
 		PermissionAppsRead:    true,
@@ -64,9 +65,8 @@ var rolePermissions = map[string]map[string]bool{
 		PermissionAuditRead:   true,
 	},
 	AdminRoleViewer: {
-		PermissionAppsRead:  true,
-		PermissionBotsRead:  true,
-		PermissionAuditRead: true,
+		PermissionAppsRead: true,
+		PermissionBotsRead: true,
 	},
 }
 
