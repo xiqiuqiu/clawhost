@@ -15,17 +15,21 @@ import (
 )
 
 type createAdminManagedUserRequest struct {
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	Password string `json:"password"`
-	Role     string `json:"role"`
+	Email       string   `json:"email"`
+	Name        string   `json:"name"`
+	Password    string   `json:"password"`
+	Role        string   `json:"role"`
+	ScopeMode   string   `json:"scope_mode"`
+	AppScopeIDs []string `json:"app_scope_ids"`
 }
 
 type updateAdminManagedUserRequest struct {
-	Name     string `json:"name"`
-	Status   string `json:"status"`
-	Role     string `json:"role"`
-	Password string `json:"password"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"`
+	Role        string   `json:"role"`
+	Password    string   `json:"password"`
+	ScopeMode   string   `json:"scope_mode"`
+	AppScopeIDs []string `json:"app_scope_ids"`
 }
 
 func ListAdminUsers(c echo.Context) error {
@@ -55,7 +59,11 @@ func CreateAdminManagedUser(c echo.Context) error {
 	if strings.TrimSpace(req.Email) == "" || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Password) == "" {
 		return util.BadRequest(c, "email, name, and password are required")
 	}
-	role, err := getPlatformAssignableRole(req.Role)
+	role, err := getManagedAdminRole(req.Role)
+	if err != nil {
+		return util.BadRequest(c, err.Error())
+	}
+	memberships, normalizedScopeMode, normalizedAppScopeIDs, err := buildManagedAdminMemberships(role, req.ScopeMode, req.AppScopeIDs)
 	if err != nil {
 		return util.BadRequest(c, err.Error())
 	}
@@ -78,11 +86,7 @@ func CreateAdminManagedUser(c echo.Context) error {
 	if err := model.CreateAdminUser(adminUser); err != nil {
 		return util.InternalError(c, "failed to create admin user")
 	}
-	if err := model.CreateAdminMembership(&model.AdminMembership{
-		AdminUserID: adminUser.ID,
-		Role:        role.Key,
-		ScopeType:   model.AdminScopePlatform,
-	}); err != nil {
+	if err := model.ReplaceAdminMemberships(adminUser.ID, memberships); err != nil {
 		return util.InternalError(c, "failed to create admin membership")
 	}
 
@@ -92,8 +96,10 @@ func CreateAdminManagedUser(c echo.Context) error {
 		TargetID:    adminUser.ID,
 		TargetLabel: adminUser.Email,
 		Metadata: map[string]interface{}{
-			"role":   role.Key,
-			"status": adminUser.Status,
+			"role":          role.Key,
+			"status":        adminUser.Status,
+			"scope_mode":    normalizedScopeMode,
+			"app_scope_ids": normalizedAppScopeIDs,
 		},
 	})
 
@@ -130,23 +136,43 @@ func UpdateAdminManagedUser(c echo.Context) error {
 		return util.InternalError(c, "failed to load admin user")
 	}
 	actor := authmw.GetAdminUserFromContext(c)
+	currentAccess, err := model.ResolveAdminAccess(adminUser.ID)
+	if err != nil {
+		return util.InternalError(c, "failed to resolve current admin access")
+	}
 	if actor != nil && actor.ID == adminUser.ID {
 		if req.Status == model.AdminUserStatusDisabled {
 			return util.Forbidden(c, "cannot disable the current admin user")
 		}
 		if req.Role != "" {
-			access, err := model.ResolveAdminAccess(adminUser.ID)
-			if err != nil {
-				return util.InternalError(c, "failed to resolve current admin access")
-			}
 			currentRole := ""
-			if len(access.Roles) > 0 {
-				currentRole = access.Roles[0]
+			if len(currentAccess.Roles) > 0 {
+				currentRole = currentAccess.Roles[0]
 			}
 			if currentRole == model.AdminRolePlatformAdmin && req.Role != model.AdminRolePlatformAdmin {
 				return util.Forbidden(c, "cannot remove platform admin role from the current admin user")
 			}
 		}
+	}
+	effectiveRole := req.Role
+	if effectiveRole == "" && len(currentAccess.Roles) > 0 {
+		effectiveRole = currentAccess.Roles[0]
+	}
+	role, err := getManagedAdminRole(effectiveRole)
+	if err != nil {
+		return util.BadRequest(c, err.Error())
+	}
+	effectiveScopeMode := req.ScopeMode
+	if effectiveScopeMode == "" {
+		effectiveScopeMode = currentAccess.ScopeMode
+	}
+	effectiveAppScopeIDs := req.AppScopeIDs
+	if req.ScopeMode == "" && len(req.AppScopeIDs) == 0 {
+		effectiveAppScopeIDs = currentAccess.AppScopeIDs
+	}
+	memberships, normalizedScopeMode, normalizedAppScopeIDs, err := buildManagedAdminMemberships(role, effectiveScopeMode, effectiveAppScopeIDs)
+	if err != nil {
+		return util.BadRequest(c, err.Error())
 	}
 
 	changedFields := []string{}
@@ -173,10 +199,10 @@ func UpdateAdminManagedUser(c echo.Context) error {
 	}
 
 	if req.Role != "" {
-		if _, err := getPlatformAssignableRole(req.Role); err != nil {
-			return util.BadRequest(c, err.Error())
-		}
 		changedFields = append(changedFields, "role")
+	}
+	if req.ScopeMode != "" || len(req.AppScopeIDs) > 0 {
+		changedFields = append(changedFields, "scope")
 	}
 
 	if err := util.GetDB().Transaction(func(tx *gorm.DB) error {
@@ -191,16 +217,15 @@ func UpdateAdminManagedUser(c echo.Context) error {
 			return err
 		}
 
-		if req.Role != "" {
+		if req.Role != "" || req.ScopeMode != "" || len(req.AppScopeIDs) > 0 {
 			if err := tx.Where("admin_user_id = ?", adminUser.ID).Delete(&model.AdminMembership{}).Error; err != nil {
 				return err
 			}
-			if err := tx.Create(&model.AdminMembership{
-				AdminUserID: adminUser.ID,
-				Role:        req.Role,
-				ScopeType:   model.AdminScopePlatform,
-			}).Error; err != nil {
-				return err
+			for _, membership := range memberships {
+				membership.AdminUserID = adminUser.ID
+				if err := tx.Create(membership).Error; err != nil {
+					return err
+				}
 			}
 		}
 
@@ -215,9 +240,14 @@ func UpdateAdminManagedUser(c echo.Context) error {
 		TargetID:    adminUser.ID,
 		TargetLabel: adminUser.Email,
 		Metadata: map[string]interface{}{
-			"changed_fields": changedFields,
-			"status":         adminUser.Status,
-			"role":           req.Role,
+			"changed_fields":   changedFields,
+			"status":           adminUser.Status,
+			"role_before":      firstRole(currentAccess.Roles),
+			"role_after":       role.Key,
+			"scope_mode_before": currentAccess.ScopeMode,
+			"scope_mode_after":  normalizedScopeMode,
+			"app_scope_ids_before": currentAccess.AppScopeIDs,
+			"app_scope_ids_after":  normalizedAppScopeIDs,
 		},
 	})
 
@@ -239,10 +269,12 @@ func buildManagedAdminUserPayload(adminUser *model.AdminUser) (map[string]interf
 	payload["roles"] = access.Roles
 	payload["permissions"] = access.Permissions
 	payload["memberships"] = access.Memberships
+	payload["scope_mode"] = access.ScopeMode
+	payload["app_scope_ids"] = access.AppScopeIDs
 	return payload, nil
 }
 
-func getPlatformAssignableRole(roleKey string) (*model.AdminRole, error) {
+func getManagedAdminRole(roleKey string) (*model.AdminRole, error) {
 	roleKey = strings.TrimSpace(roleKey)
 	if roleKey == "" {
 		return nil, errors.New("role is required")
@@ -257,8 +289,76 @@ func getPlatformAssignableRole(roleKey string) (*model.AdminRole, error) {
 	if !role.IsSystem {
 		return nil, errors.New("invalid role")
 	}
-	if role.ScopeType != model.AdminScopePlatform {
-		return nil, errors.New("role requires non-platform scope")
-	}
 	return role, nil
+}
+
+func buildManagedAdminMemberships(role *model.AdminRole, requestedScopeMode string, appScopeIDs []string) ([]*model.AdminMembership, string, []string, error) {
+	scopeMode := strings.TrimSpace(requestedScopeMode)
+	if scopeMode == "" {
+		scopeMode = model.AdminScopeModePlatform
+	}
+
+	normalizedAppScopeIDs := make([]string, 0, len(appScopeIDs))
+	appScopeIDSet := make(map[string]struct{})
+	for _, appID := range appScopeIDs {
+		appID = strings.TrimSpace(appID)
+		if appID == "" {
+			continue
+		}
+		if _, ok := appScopeIDSet[appID]; ok {
+			continue
+		}
+		appScopeIDSet[appID] = struct{}{}
+		if _, err := model.GetAppByID(appID); err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, "", nil, errors.New("invalid app scope")
+			}
+			return nil, "", nil, err
+		}
+		normalizedAppScopeIDs = append(normalizedAppScopeIDs, appID)
+	}
+
+	if role.Key == model.AdminRolePlatformAdmin {
+		if scopeMode != model.AdminScopeModePlatform || len(normalizedAppScopeIDs) > 0 {
+			return nil, "", nil, errors.New("platform admin must use platform scope")
+		}
+		return []*model.AdminMembership{
+			{
+				Role:      role.Key,
+				ScopeType: model.AdminScopePlatform,
+			},
+		}, model.AdminScopeModePlatform, nil, nil
+	}
+
+	switch scopeMode {
+	case model.AdminScopeModePlatform:
+		return []*model.AdminMembership{
+			{
+				Role:      role.Key,
+				ScopeType: model.AdminScopePlatform,
+			},
+		}, model.AdminScopeModePlatform, nil, nil
+	case model.AdminScopeModeSelectedApps:
+		if len(normalizedAppScopeIDs) == 0 {
+			return nil, "", nil, errors.New("selected app scope requires at least one app")
+		}
+		memberships := make([]*model.AdminMembership, 0, len(normalizedAppScopeIDs))
+		for _, appID := range normalizedAppScopeIDs {
+			memberships = append(memberships, &model.AdminMembership{
+				Role:      role.Key,
+				ScopeType: model.AdminScopeApp,
+				ScopeID:   appID,
+			})
+		}
+		return memberships, model.AdminScopeModeSelectedApps, normalizedAppScopeIDs, nil
+	default:
+		return nil, "", nil, errors.New("invalid scope mode")
+	}
+}
+
+func firstRole(roles []string) string {
+	if len(roles) == 0 {
+		return ""
+	}
+	return roles[0]
 }

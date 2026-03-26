@@ -14,10 +14,27 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+func createTestAppRecord(t *testing.T, name string) *model.App {
+	t.Helper()
+
+	app := &model.App{
+		Name:              name,
+		OwnerEmail:        name + "@example.com",
+		BotDomainTemplate: "https://{bot_id}.clawhost.ai",
+	}
+	if err := model.CreateApp(app); err != nil {
+		t.Fatalf("create test app: %v", err)
+	}
+	return app
+}
+
 func setupAdminUserManagementTestDB(t *testing.T) {
 	t.Helper()
 
 	db := setupAdminAuthTestDB(t)
+	if err := db.AutoMigrate(&model.App{}); err != nil {
+		t.Fatalf("migrate app model: %v", err)
+	}
 	migrateAdminPolicyModelsForTest(t, db)
 }
 
@@ -107,12 +124,16 @@ func TestCreateAdminUserCreatesMembershipAndAuditLog(t *testing.T) {
 	setupAdminUserManagementTestDB(t)
 
 	actor := createPlatformAdminUser(t, "admin@example.com")
+	appOne := createTestAppRecord(t, "Scoped One")
+	appTwo := createTestAppRecord(t, "Scoped Two")
 
-	body, _ := json.Marshal(map[string]string{
-		"email":    "operator@example.com",
-		"name":     "Operator",
-		"password": "secret-123",
-		"role":     model.AdminRoleOperator,
+	body, _ := json.Marshal(map[string]interface{}{
+		"email":         "operator@example.com",
+		"name":          "Operator",
+		"password":      "secret-123",
+		"role":          model.AdminRoleOperator,
+		"scope_mode":    model.AdminScopeModeSelectedApps,
+		"app_scope_ids": []string{appTwo.ID, appOne.ID},
 	})
 
 	e := echo.New()
@@ -144,6 +165,12 @@ func TestCreateAdminUserCreatesMembershipAndAuditLog(t *testing.T) {
 	if len(access.Roles) != 1 || access.Roles[0] != model.AdminRoleOperator {
 		t.Fatalf("expected operator role, got %#v", access.Roles)
 	}
+	if access.ScopeMode != model.AdminScopeModeSelectedApps {
+		t.Fatalf("expected selected app scope mode, got %q", access.ScopeMode)
+	}
+	if len(access.AppScopeIDs) != 2 || access.AppScopeIDs[0] != appOne.ID || access.AppScopeIDs[1] != appTwo.ID {
+		t.Fatalf("unexpected app scope ids: %#v", access.AppScopeIDs)
+	}
 
 	logs, err := model.ListAuditLogs(model.AuditLogFilter{Action: "admin.create"})
 	if err != nil {
@@ -155,12 +182,21 @@ func TestCreateAdminUserCreatesMembershipAndAuditLog(t *testing.T) {
 	if logs[0].TargetID != created.ID {
 		t.Fatalf("expected created admin to be audit target, got %q", logs[0].TargetID)
 	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(logs[0].Metadata, &metadata); err != nil {
+		t.Fatalf("decode create audit metadata: %v", err)
+	}
+	if metadata["scope_mode"] != model.AdminScopeModeSelectedApps {
+		t.Fatalf("expected selected scope metadata, got %#v", metadata["scope_mode"])
+	}
 }
 
 func TestUpdateAdminUserUpdatesRoleStatusPasswordAndAuditLog(t *testing.T) {
 	setupAdminUserManagementTestDB(t)
 
 	actor := createPlatformAdminUser(t, "admin@example.com")
+	appOne := createTestAppRecord(t, "Update One")
+	appTwo := createTestAppRecord(t, "Update Two")
 	target := &model.AdminUser{
 		Email:        "viewer@example.com",
 		Name:         "Viewer",
@@ -169,19 +205,24 @@ func TestUpdateAdminUserUpdatesRoleStatusPasswordAndAuditLog(t *testing.T) {
 	if err := model.CreateAdminUser(target); err != nil {
 		t.Fatalf("create target admin: %v", err)
 	}
-	if err := model.CreateAdminMembership(&model.AdminMembership{
-		AdminUserID: target.ID,
-		Role:        model.AdminRoleViewer,
-		ScopeType:   model.AdminScopePlatform,
+	if err := model.ReplaceAdminMemberships(target.ID, []*model.AdminMembership{
+		{
+			AdminUserID: target.ID,
+			Role:        model.AdminRoleViewer,
+			ScopeType:   model.AdminScopeApp,
+			ScopeID:     appOne.ID,
+		},
 	}); err != nil {
 		t.Fatalf("create target membership: %v", err)
 	}
 
-	body, _ := json.Marshal(map[string]string{
-		"name":     "Viewer Updated",
-		"role":     model.AdminRoleOperator,
-		"status":   model.AdminUserStatusDisabled,
-		"password": "secret-456",
+	body, _ := json.Marshal(map[string]interface{}{
+		"name":          "Viewer Updated",
+		"role":          model.AdminRoleOperator,
+		"status":        model.AdminUserStatusDisabled,
+		"password":      "secret-456",
+		"scope_mode":    model.AdminScopeModeSelectedApps,
+		"app_scope_ids": []string{appTwo.ID},
 	})
 
 	e := echo.New()
@@ -221,6 +262,12 @@ func TestUpdateAdminUserUpdatesRoleStatusPasswordAndAuditLog(t *testing.T) {
 	if len(access.Roles) != 1 || access.Roles[0] != model.AdminRoleOperator {
 		t.Fatalf("expected operator role after update, got %#v", access.Roles)
 	}
+	if access.ScopeMode != model.AdminScopeModeSelectedApps {
+		t.Fatalf("expected selected app scope mode after update, got %q", access.ScopeMode)
+	}
+	if len(access.AppScopeIDs) != 1 || access.AppScopeIDs[0] != appTwo.ID {
+		t.Fatalf("unexpected app scope ids after update: %#v", access.AppScopeIDs)
+	}
 
 	logs, err := model.ListAuditLogs(model.AuditLogFilter{Action: "admin.update"})
 	if err != nil {
@@ -232,18 +279,89 @@ func TestUpdateAdminUserUpdatesRoleStatusPasswordAndAuditLog(t *testing.T) {
 	if logs[0].TargetID != target.ID {
 		t.Fatalf("expected updated admin to be audit target, got %q", logs[0].TargetID)
 	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(logs[0].Metadata, &metadata); err != nil {
+		t.Fatalf("decode update audit metadata: %v", err)
+	}
+	if metadata["scope_mode_before"] != model.AdminScopeModeSelectedApps {
+		t.Fatalf("expected previous selected scope metadata, got %#v", metadata["scope_mode_before"])
+	}
+	if metadata["scope_mode_after"] != model.AdminScopeModeSelectedApps {
+		t.Fatalf("expected updated selected scope metadata, got %#v", metadata["scope_mode_after"])
+	}
 }
 
-func TestCreateAdminUserRejectsAppScopedRole(t *testing.T) {
+func TestCreateAdminUserRejectsPlatformAdminSelectedApps(t *testing.T) {
+	setupAdminUserManagementTestDB(t)
+
+	actor := createPlatformAdminUser(t, "admin@example.com")
+	app := createTestAppRecord(t, "Forbidden Platform Scope")
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"email":         "platform-scoped@example.com",
+		"name":          "Platform Scoped",
+		"password":      "secret-123",
+		"role":          model.AdminRolePlatformAdmin,
+		"scope_mode":    model.AdminScopeModeSelectedApps,
+		"app_scope_ids": []string{app.ID},
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/bot/api/v1/admin/admin-users", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(authmw.ContextKeyAdminUser, actor)
+
+	if err := CreateAdminManagedUser(c); err != nil {
+		t.Fatalf("CreateAdminManagedUser returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestCreateAdminUserRejectsSelectedAppsWithoutAppIDs(t *testing.T) {
 	setupAdminUserManagementTestDB(t)
 
 	actor := createPlatformAdminUser(t, "admin@example.com")
 
-	body, _ := json.Marshal(map[string]string{
-		"email":    "appadmin@example.com",
-		"name":     "App Admin",
-		"password": "secret-123",
-		"role":     model.AdminRoleAppAdmin,
+	body, _ := json.Marshal(map[string]interface{}{
+		"email":         "empty-scope@example.com",
+		"name":          "Empty Scope",
+		"password":      "secret-123",
+		"role":          model.AdminRoleViewer,
+		"scope_mode":    model.AdminScopeModeSelectedApps,
+		"app_scope_ids": []string{},
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/bot/api/v1/admin/admin-users", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(authmw.ContextKeyAdminUser, actor)
+
+	if err := CreateAdminManagedUser(c); err != nil {
+		t.Fatalf("CreateAdminManagedUser returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestCreateAdminUserRejectsUnknownScopedAppID(t *testing.T) {
+	setupAdminUserManagementTestDB(t)
+
+	actor := createPlatformAdminUser(t, "admin@example.com")
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"email":         "missing-app@example.com",
+		"name":          "Missing App",
+		"password":      "secret-123",
+		"role":          model.AdminRoleViewer,
+		"scope_mode":    model.AdminScopeModeSelectedApps,
+		"app_scope_ids": []string{"missing-app-id"},
 	})
 
 	e := echo.New()
