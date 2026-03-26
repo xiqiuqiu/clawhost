@@ -7,10 +7,13 @@ import (
 	"sync/atomic"
 
 	"github.com/clawhost/clawhost/model"
+	auditservice "github.com/clawhost/clawhost/service/audit"
 	"github.com/clawhost/clawhost/service/k8s"
 	"github.com/clawhost/clawhost/util"
 	"github.com/labstack/echo/v4"
 )
+
+var restartBotsAsyncFn = restartBotsAsync
 
 type RestartResult struct {
 	BotID   string `json:"bot_id"`
@@ -29,6 +32,17 @@ func RestartAllBots(c echo.Context) error {
 	}
 
 	if len(bots) == 0 {
+		writeAuditEntry(c, auditservice.Entry{
+			Action:     "bot.restart_all",
+			TargetType: "bot",
+			TargetID:   "*",
+			Result:     model.AuditResultSuccess,
+			Metadata: map[string]interface{}{
+				"total":   0,
+				"status":  "skipped",
+				"message": "no running bots to restart",
+			},
+		})
 		return util.Success(c, map[string]interface{}{
 			"total":   0,
 			"message": "no running bots to restart",
@@ -36,7 +50,19 @@ func RestartAllBots(c echo.Context) error {
 	}
 
 	// Launch restart in background
-	go restartBotsAsync(bots)
+	go restartBotsAsyncFn(bots)
+
+	writeAuditEntry(c, auditservice.Entry{
+		Action:     "bot.restart_all",
+		TargetType: "bot",
+		TargetID:   "*",
+		Result:     model.AuditResultSuccess,
+		Metadata: map[string]interface{}{
+			"total":   len(bots),
+			"status":  "initiated",
+			"message": "restart initiated in background",
+		},
+	})
 
 	return util.Success(c, map[string]interface{}{
 		"total":   len(bots),
