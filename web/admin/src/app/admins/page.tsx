@@ -38,24 +38,20 @@ import {
 import { useAuth } from "@/components/auth-provider";
 import {
   createManagedAdminUser,
+  listAdminRoles,
   listManagedAdminUsers,
   updateManagedAdminUser,
+  type AdminRole,
   type ManagedAdminUser,
 } from "@/lib/api";
-
-const roleOptions = [
-  { value: "platform_admin", label: "Platform Admin" },
-  { value: "operator", label: "Operator" },
-  { value: "viewer", label: "Viewer" },
-];
 
 const statusOptions = [
   { value: "active", label: "Active" },
   { value: "disabled", label: "Disabled" },
 ];
 
-function formatRole(role: string) {
-  return roleOptions.find((item) => item.value === role)?.label || role;
+function formatRole(role: string, roles: AdminRole[]) {
+  return roles.find((item) => item.key === role)?.name || role;
 }
 
 function formatStatus(status: string) {
@@ -79,6 +75,7 @@ export default function AdminsPage() {
   const { isAuthed, hasPermission, admin: currentAdmin } = useAuth();
   const canManageAdmins = hasPermission("admins:manage");
   const [admins, setAdmins] = useState<ManagedAdminUser[]>([]);
+  const [roles, setRoles] = useState<AdminRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editAdmin, setEditAdmin] = useState<ManagedAdminUser | null>(null);
@@ -98,14 +95,22 @@ export default function AdminsPage() {
   const fetchAdmins = useCallback(async () => {
     if (!canManageAdmins) {
       setAdmins([]);
+      setRoles([]);
       setLoading(false);
       return;
     }
 
     try {
       setLoading(true);
-      const res = await listManagedAdminUsers();
-      setAdmins(res.data || []);
+      const [adminsRes, rolesRes] = await Promise.all([
+        listManagedAdminUsers(),
+        listAdminRoles(),
+      ]);
+      const platformRoles = (rolesRes.data || []).filter(
+        (role) => role.scope_type === "platform"
+      );
+      setAdmins(adminsRes.data || []);
+      setRoles(platformRoles);
     } catch (err) {
       toast.error("Failed to load admins: " + (err as Error).message);
     } finally {
@@ -170,6 +175,12 @@ export default function AdminsPage() {
     });
   };
 
+  const roleOptions = roles.map((role) => ({
+    value: role.key,
+    label: role.name,
+  }));
+  const createRoleDisabled = roleOptions.length === 0;
+
   if (!isAuthed) return null;
 
   if (!canManageAdmins) {
@@ -230,7 +241,7 @@ export default function AdminsPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-sm">{admin.email}</TableCell>
-                    <TableCell>{formatRole(admin.roles[0] || "viewer")}</TableCell>
+                    <TableCell>{formatRole(admin.roles[0] || "viewer", roles)}</TableCell>
                     <TableCell>
                       <Badge variant={admin.status === "active" ? "default" : "secondary"}>
                         {formatStatus(admin.status)}
@@ -263,7 +274,7 @@ export default function AdminsPage() {
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 truncate">{admin.email}</p>
                       <p className="text-xs text-muted-foreground mt-2">
-                        {formatRole(admin.roles[0] || "viewer")}
+                        {formatRole(admin.roles[0] || "viewer", roles)}
                       </p>
                     </div>
                     <AdminActions onEdit={() => openEdit(admin)} />
@@ -335,7 +346,7 @@ export default function AdminsPage() {
             </Button>
             <Button
               onClick={handleCreate}
-              disabled={!createForm.name || !createForm.email || !createForm.password}
+              disabled={!createForm.name || !createForm.email || !createForm.password || createRoleDisabled}
               className="w-full sm:w-auto"
             >
               Create

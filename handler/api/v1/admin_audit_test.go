@@ -15,9 +15,10 @@ import (
 
 func TestAuditCreateAppWritesEntry(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.App{}, &model.AdminUser{}, &model.AdminMembership{}, &model.AuditLog{}); err != nil {
-		t.Fatalf("migrate audit handler models: %v", err)
+	if err := db.AutoMigrate(&model.App{}); err != nil {
+		t.Fatalf("migrate app model: %v", err)
 	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := &model.AdminUser{
 		Email:        "admin@example.com",
@@ -69,9 +70,7 @@ func TestAuditCreateAppWritesEntry(t *testing.T) {
 
 func TestAuditListEndpoint(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminMembership{}, &model.AuditLog{}); err != nil {
-		t.Fatalf("migrate audit list models: %v", err)
-	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := &model.AdminUser{
 		Email:        "viewer@example.com",
@@ -126,9 +125,7 @@ func TestAuditListEndpoint(t *testing.T) {
 
 func TestAuditListEndpointForbidsViewer(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminMembership{}, &model.AuditLog{}); err != nil {
-		t.Fatalf("migrate audit list models: %v", err)
-	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := &model.AdminUser{
 		Email:        "viewer@example.com",
@@ -162,9 +159,7 @@ func TestAuditListEndpointForbidsViewer(t *testing.T) {
 
 func TestAuditListEndpointScopesAppAdmin(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminMembership{}, &model.AuditLog{}); err != nil {
-		t.Fatalf("migrate audit list models: %v", err)
-	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := &model.AdminUser{
 		Email:        "appadmin@example.com",
@@ -242,5 +237,45 @@ func TestAuditListEndpointScopesAppAdmin(t *testing.T) {
 	}
 	if entry["app_id"] != "app-123" {
 		t.Fatalf("expected scoped app_id app-123, got %#v", entry["app_id"])
+	}
+}
+
+func TestRolePermissionChangesAreAudited(t *testing.T) {
+	setupAdminRoleTestDB(t)
+
+	admin := createPlatformAdminUser(t, "admin@example.com")
+
+	body, _ := json.Marshal(map[string][]string{
+		"permissions": []string{
+			model.PermissionAppsRead,
+			model.PermissionBotsRead,
+		},
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPut, "/bot/api/v1/admin/roles/operator/permissions", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("key")
+	c.SetParamValues(model.AdminRoleOperator)
+	c.Set(authmw.ContextKeyAdminUser, admin)
+
+	if err := UpdateAdminRolePermissions(c); err != nil {
+		t.Fatalf("UpdateAdminRolePermissions returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	logs, err := model.ListAuditLogs(model.AuditLogFilter{Action: "role.update_permissions"})
+	if err != nil {
+		t.Fatalf("list audit logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 role.update_permissions audit log, got %d", len(logs))
+	}
+	if logs[0].TargetID != model.AdminRoleOperator {
+		t.Fatalf("expected operator role to be audit target, got %q", logs[0].TargetID)
 	}
 }

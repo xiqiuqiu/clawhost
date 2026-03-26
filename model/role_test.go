@@ -3,6 +3,14 @@ package model
 import "testing"
 
 func TestRolePermissions(t *testing.T) {
+	db := setupModelTestDB(t)
+	if err := db.AutoMigrate(&AdminRole{}, &AdminPermission{}, &AdminRolePermission{}); err != nil {
+		t.Fatalf("migrate admin policy models: %v", err)
+	}
+	if err := SeedSystemAdminPolicy(); err != nil {
+		t.Fatalf("seed system admin policy: %v", err)
+	}
+
 	if !RoleHasPermission(AdminRolePlatformAdmin, PermissionAppsCreate) {
 		t.Fatal("expected platform admin to create apps")
 	}
@@ -25,8 +33,11 @@ func TestRolePermissions(t *testing.T) {
 
 func TestAdminMembershipScope(t *testing.T) {
 	db := setupModelTestDB(t)
-	if err := db.AutoMigrate(&AdminUser{}, &AdminMembership{}); err != nil {
+	if err := db.AutoMigrate(&AdminUser{}, &AdminMembership{}, &AdminRole{}, &AdminPermission{}, &AdminRolePermission{}); err != nil {
 		t.Fatalf("migrate admin membership models: %v", err)
+	}
+	if err := SeedSystemAdminPolicy(); err != nil {
+		t.Fatalf("seed system admin policy: %v", err)
 	}
 
 	admin := &AdminUser{
@@ -66,8 +77,11 @@ func TestAdminMembershipScope(t *testing.T) {
 
 func TestResolveAdminAccess(t *testing.T) {
 	db := setupModelTestDB(t)
-	if err := db.AutoMigrate(&AdminUser{}, &AdminMembership{}); err != nil {
+	if err := db.AutoMigrate(&AdminUser{}, &AdminMembership{}, &AdminRole{}, &AdminPermission{}, &AdminRolePermission{}); err != nil {
 		t.Fatalf("migrate admin membership models: %v", err)
+	}
+	if err := SeedSystemAdminPolicy(); err != nil {
+		t.Fatalf("seed system admin policy: %v", err)
 	}
 
 	admin := &AdminUser{

@@ -165,6 +165,9 @@ func startServer() {
 	{
 		admin.POST("/logout", v1.AdminLogout)
 		admin.GET("/me", v1.GetCurrentAdmin)
+		admin.GET("/roles", v1.ListAdminRolesHandler, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.GET("/permissions", v1.ListAdminPermissionsHandler, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.PUT("/roles/:key/permissions", v1.UpdateAdminRolePermissions, authmw.RequirePermission(model.PermissionAdminsManage))
 		admin.GET("/admin-users", v1.ListAdminUsers, authmw.RequirePermission(model.PermissionAdminsManage))
 		admin.POST("/admin-users", v1.CreateAdminManagedUser, authmw.RequirePermission(model.PermissionAdminsManage))
 		admin.PUT("/admin-users/:id", v1.UpdateAdminManagedUser, authmw.RequirePermission(model.PermissionAdminsManage))

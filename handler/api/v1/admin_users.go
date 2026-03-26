@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -12,12 +13,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 )
-
-var managedAdminRoles = map[string]bool{
-	model.AdminRolePlatformAdmin: true,
-	model.AdminRoleOperator:      true,
-	model.AdminRoleViewer:        true,
-}
 
 type createAdminManagedUserRequest struct {
 	Email    string `json:"email"`
@@ -60,8 +55,9 @@ func CreateAdminManagedUser(c echo.Context) error {
 	if strings.TrimSpace(req.Email) == "" || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Password) == "" {
 		return util.BadRequest(c, "email, name, and password are required")
 	}
-	if !isManagedAdminRole(req.Role) {
-		return util.BadRequest(c, "invalid role")
+	role, err := getPlatformAssignableRole(req.Role)
+	if err != nil {
+		return util.BadRequest(c, err.Error())
 	}
 
 	if _, err := model.GetAdminUserByEmail(req.Email); err == nil {
@@ -84,7 +80,7 @@ func CreateAdminManagedUser(c echo.Context) error {
 	}
 	if err := model.CreateAdminMembership(&model.AdminMembership{
 		AdminUserID: adminUser.ID,
-		Role:        req.Role,
+		Role:        role.Key,
 		ScopeType:   model.AdminScopePlatform,
 	}); err != nil {
 		return util.InternalError(c, "failed to create admin membership")
@@ -96,7 +92,7 @@ func CreateAdminManagedUser(c echo.Context) error {
 		TargetID:    adminUser.ID,
 		TargetLabel: adminUser.Email,
 		Metadata: map[string]interface{}{
-			"role":   req.Role,
+			"role":   role.Key,
 			"status": adminUser.Status,
 		},
 	})
@@ -177,8 +173,8 @@ func UpdateAdminManagedUser(c echo.Context) error {
 	}
 
 	if req.Role != "" {
-		if !isManagedAdminRole(req.Role) {
-			return util.BadRequest(c, "invalid role")
+		if _, err := getPlatformAssignableRole(req.Role); err != nil {
+			return util.BadRequest(c, err.Error())
 		}
 		changedFields = append(changedFields, "role")
 	}
@@ -246,6 +242,23 @@ func buildManagedAdminUserPayload(adminUser *model.AdminUser) (map[string]interf
 	return payload, nil
 }
 
-func isManagedAdminRole(role string) bool {
-	return managedAdminRoles[strings.TrimSpace(role)]
+func getPlatformAssignableRole(roleKey string) (*model.AdminRole, error) {
+	roleKey = strings.TrimSpace(roleKey)
+	if roleKey == "" {
+		return nil, errors.New("role is required")
+	}
+	role, err := model.GetAdminRoleByKey(roleKey)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, errors.New("invalid role")
+		}
+		return nil, err
+	}
+	if !role.IsSystem {
+		return nil, errors.New("invalid role")
+	}
+	if role.ScopeType != model.AdminScopePlatform {
+		return nil, errors.New("role requires non-platform scope")
+	}
+	return role, nil
 }

@@ -39,12 +39,28 @@ func setupAdminAuthTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func migrateAdminPolicyModelsForTest(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if err := db.AutoMigrate(
+		&model.AdminUser{},
+		&model.AdminSession{},
+		&model.AdminMembership{},
+		&model.AdminRole{},
+		&model.AdminPermission{},
+		&model.AdminRolePermission{},
+		&model.AuditLog{},
+	); err != nil {
+		t.Fatalf("migrate admin policy models: %v", err)
+	}
+	if err := model.SeedSystemAdminPolicy(); err != nil {
+		t.Fatalf("seed system admin policy: %v", err)
+	}
+}
+
 func TestBootstrapAdmin(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
 	viper.Set("api.admin_token", "bootstrap-token")
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}, &model.AdminMembership{}); err != nil {
-		t.Fatalf("migrate admin auth models: %v", err)
-	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	reqBody := map[string]string{
 		"email":    "admin@example.com",
@@ -91,9 +107,7 @@ func TestBootstrapAdmin(t *testing.T) {
 
 func TestAdminLogin(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}, &model.AdminMembership{}); err != nil {
-		t.Fatalf("migrate admin auth models: %v", err)
-	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := &model.AdminUser{
 		Email:        "admin@example.com",
@@ -150,9 +164,7 @@ func TestAdminLogin(t *testing.T) {
 
 func TestAdminLogout(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}, &model.AdminMembership{}); err != nil {
-		t.Fatalf("migrate admin auth models: %v", err)
-	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := &model.AdminUser{
 		Email:        "logout@example.com",
@@ -191,9 +203,7 @@ func TestAdminLogout(t *testing.T) {
 
 func TestVerifyAdminSession(t *testing.T) {
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminSession{}, &model.AdminMembership{}); err != nil {
-		t.Fatalf("migrate admin auth models: %v", err)
-	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := &model.AdminUser{
 		Email:        "me@example.com",

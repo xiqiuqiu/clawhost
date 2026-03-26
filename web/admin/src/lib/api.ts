@@ -27,6 +27,28 @@ export interface AdminSessionPayload {
 
 export interface ManagedAdminUser extends AdminUser {}
 
+export interface AdminRole {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  scope_type: string;
+  is_system: boolean;
+  permissions: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminPermission {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  resource_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AuditLog {
   id: string;
   actor_admin_id: string;
@@ -162,6 +184,24 @@ export async function updateManagedAdminUser(
   return request<ManagedAdminUser>(`/admin-users/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
+  });
+}
+
+export async function listAdminRoles() {
+  return request<AdminRole[]>("/roles");
+}
+
+export async function listAdminPermissions() {
+  return request<AdminPermission[]>("/permissions");
+}
+
+export async function updateAdminRolePermissions(
+  key: string,
+  permissions: string[]
+) {
+  return request<AdminRole>(`/roles/${key}/permissions`, {
+    method: "PUT",
+    body: JSON.stringify({ permissions }),
   });
 }
 

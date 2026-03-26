@@ -18,9 +18,7 @@ func setupAdminUserManagementTestDB(t *testing.T) {
 	t.Helper()
 
 	db := setupAdminAuthTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminMembership{}, &model.AuditLog{}); err != nil {
-		t.Fatalf("migrate admin user management models: %v", err)
-	}
+	migrateAdminPolicyModelsForTest(t, db)
 }
 
 func createPlatformAdminUser(t *testing.T, email string) *model.AdminUser {
@@ -233,5 +231,32 @@ func TestUpdateAdminUserUpdatesRoleStatusPasswordAndAuditLog(t *testing.T) {
 	}
 	if logs[0].TargetID != target.ID {
 		t.Fatalf("expected updated admin to be audit target, got %q", logs[0].TargetID)
+	}
+}
+
+func TestCreateAdminUserRejectsAppScopedRole(t *testing.T) {
+	setupAdminUserManagementTestDB(t)
+
+	actor := createPlatformAdminUser(t, "admin@example.com")
+
+	body, _ := json.Marshal(map[string]string{
+		"email":    "appadmin@example.com",
+		"name":     "App Admin",
+		"password": "secret-123",
+		"role":     model.AdminRoleAppAdmin,
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/bot/api/v1/admin/admin-users", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(authmw.ContextKeyAdminUser, actor)
+
+	if err := CreateAdminManagedUser(c); err != nil {
+		t.Fatalf("CreateAdminManagedUser returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 }

@@ -1,6 +1,12 @@
 package model
 
-import "sort"
+import (
+	"errors"
+	"sort"
+
+	"github.com/clawhost/clawhost/util"
+	"gorm.io/gorm"
+)
 
 const (
 	AdminScopePlatform = "platform"
@@ -30,64 +36,6 @@ const (
 	PermissionAuditRead      = "audit:read"
 )
 
-var rolePermissions = map[string]map[string]bool{
-	AdminRolePlatformAdmin: {
-		PermissionAppsRead:       true,
-		PermissionAppsCreate:     true,
-		PermissionAppsUpdate:     true,
-		PermissionAppsDelete:     true,
-		PermissionAppsTokenReset: true,
-		PermissionAdminsManage:   true,
-		PermissionBotsRead:       true,
-		PermissionBotsCreate:     true,
-		PermissionBotsStart:      true,
-		PermissionBotsStop:       true,
-		PermissionBotsDelete:     true,
-		PermissionBotsUpgrade:    true,
-		PermissionAuditRead:      true,
-	},
-	AdminRoleAppAdmin: {
-		PermissionAppsRead:       true,
-		PermissionAppsUpdate:     true,
-		PermissionAppsTokenReset: true,
-		PermissionBotsRead:       true,
-		PermissionBotsCreate:     true,
-		PermissionBotsStart:      true,
-		PermissionBotsStop:       true,
-		PermissionBotsDelete:     true,
-		PermissionBotsUpgrade:    true,
-		PermissionAuditRead:      true,
-	},
-	AdminRoleOperator: {
-		PermissionAppsRead:    true,
-		PermissionBotsRead:    true,
-		PermissionBotsStart:   true,
-		PermissionBotsStop:    true,
-		PermissionBotsUpgrade: true,
-		PermissionAuditRead:   true,
-	},
-	AdminRoleViewer: {
-		PermissionAppsRead: true,
-		PermissionBotsRead: true,
-	},
-}
-
-var allPermissions = []string{
-	PermissionAppsRead,
-	PermissionAppsCreate,
-	PermissionAppsUpdate,
-	PermissionAppsDelete,
-	PermissionAppsTokenReset,
-	PermissionAdminsManage,
-	PermissionBotsRead,
-	PermissionBotsCreate,
-	PermissionBotsStart,
-	PermissionBotsStop,
-	PermissionBotsDelete,
-	PermissionBotsUpgrade,
-	PermissionAuditRead,
-}
-
 type AdminMembershipSummary struct {
 	Role      string `json:"role"`
 	ScopeType string `json:"scope_type"`
@@ -100,12 +48,194 @@ type AdminAccessSummary struct {
 	Memberships []AdminMembershipSummary `json:"memberships"`
 }
 
+var errMissingSystemAdminPolicy = errors.New("missing system admin policy")
+
+func SystemAdminRoleCatalog() []AdminRole {
+	return []AdminRole{
+		{
+			Key:         AdminRolePlatformAdmin,
+			Name:        "Platform Admin",
+			Description: "Full platform access and policy management.",
+			ScopeType:   AdminScopePlatform,
+			IsSystem:    true,
+		},
+		{
+			Key:         AdminRoleAppAdmin,
+			Name:        "App Admin",
+			Description: "Manage app-scoped app and bot resources.",
+			ScopeType:   AdminScopeApp,
+			IsSystem:    true,
+		},
+		{
+			Key:         AdminRoleOperator,
+			Name:        "Operator",
+			Description: "Operate bot runtime actions without policy management.",
+			ScopeType:   AdminScopePlatform,
+			IsSystem:    true,
+		},
+		{
+			Key:         AdminRoleViewer,
+			Name:        "Viewer",
+			Description: "Read-only platform access.",
+			ScopeType:   AdminScopePlatform,
+			IsSystem:    true,
+		},
+	}
+}
+
+func SystemAdminPermissionCatalog() []AdminPermission {
+	return []AdminPermission{
+		{Key: PermissionAppsRead, Name: "Read Apps", Description: "View applications.", ResourceType: "apps"},
+		{Key: PermissionAppsCreate, Name: "Create Apps", Description: "Create applications.", ResourceType: "apps"},
+		{Key: PermissionAppsUpdate, Name: "Update Apps", Description: "Edit applications.", ResourceType: "apps"},
+		{Key: PermissionAppsDelete, Name: "Delete Apps", Description: "Delete applications.", ResourceType: "apps"},
+		{Key: PermissionAppsTokenReset, Name: "Reset App Tokens", Description: "Reset application API tokens.", ResourceType: "apps"},
+		{Key: PermissionAdminsManage, Name: "Manage Admins", Description: "Manage admins and role policy.", ResourceType: "admins"},
+		{Key: PermissionBotsRead, Name: "Read Bots", Description: "View bots.", ResourceType: "bots"},
+		{Key: PermissionBotsCreate, Name: "Create Bots", Description: "Create bots.", ResourceType: "bots"},
+		{Key: PermissionBotsStart, Name: "Start Bots", Description: "Start bots.", ResourceType: "bots"},
+		{Key: PermissionBotsStop, Name: "Stop Bots", Description: "Stop bots.", ResourceType: "bots"},
+		{Key: PermissionBotsDelete, Name: "Delete Bots", Description: "Delete bots.", ResourceType: "bots"},
+		{Key: PermissionBotsUpgrade, Name: "Upgrade Bots", Description: "Upgrade bots.", ResourceType: "bots"},
+		{Key: PermissionAuditRead, Name: "Read Audit", Description: "View audit logs.", ResourceType: "audit"},
+	}
+}
+
+func systemAdminRolePermissionCatalog() map[string][]string {
+	return map[string][]string{
+		AdminRolePlatformAdmin: {
+			PermissionAppsRead,
+			PermissionAppsCreate,
+			PermissionAppsUpdate,
+			PermissionAppsDelete,
+			PermissionAppsTokenReset,
+			PermissionAdminsManage,
+			PermissionBotsRead,
+			PermissionBotsCreate,
+			PermissionBotsStart,
+			PermissionBotsStop,
+			PermissionBotsDelete,
+			PermissionBotsUpgrade,
+			PermissionAuditRead,
+		},
+		AdminRoleAppAdmin: {
+			PermissionAppsRead,
+			PermissionAppsUpdate,
+			PermissionAppsTokenReset,
+			PermissionBotsRead,
+			PermissionBotsCreate,
+			PermissionBotsStart,
+			PermissionBotsStop,
+			PermissionBotsDelete,
+			PermissionBotsUpgrade,
+			PermissionAuditRead,
+		},
+		AdminRoleOperator: {
+			PermissionAppsRead,
+			PermissionBotsRead,
+			PermissionBotsStart,
+			PermissionBotsStop,
+			PermissionBotsUpgrade,
+			PermissionAuditRead,
+		},
+		AdminRoleViewer: {
+			PermissionAppsRead,
+			PermissionBotsRead,
+		},
+	}
+}
+
+func SeedSystemAdminPolicy() error {
+	db := util.GetDB()
+	if db == nil {
+		return errors.New("db is not initialized")
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, role := range SystemAdminRoleCatalog() {
+			if err := tx.Where("key = ?", role.Key).Assign(map[string]interface{}{
+				"name":        role.Name,
+				"description": role.Description,
+				"scope_type":  role.ScopeType,
+				"is_system":   role.IsSystem,
+			}).FirstOrCreate(&AdminRole{Key: role.Key}).Error; err != nil {
+				return err
+			}
+		}
+
+		for _, permission := range SystemAdminPermissionCatalog() {
+			if err := tx.Where("key = ?", permission.Key).Assign(map[string]interface{}{
+				"name":          permission.Name,
+				"description":   permission.Description,
+				"resource_type": permission.ResourceType,
+			}).FirstOrCreate(&AdminPermission{Key: permission.Key}).Error; err != nil {
+				return err
+			}
+		}
+
+		for roleKey, permissionKeys := range systemAdminRolePermissionCatalog() {
+			for _, permissionKey := range permissionKeys {
+				if err := tx.Where("role_key = ? AND permission_key = ?", roleKey, permissionKey).
+					FirstOrCreate(&AdminRolePermission{
+						RoleKey:       roleKey,
+						PermissionKey: permissionKey,
+					}).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	})
+}
+
+func EnsureSystemAdminPolicy() error {
+	if err := SeedSystemAdminPolicy(); err != nil {
+		return err
+	}
+
+	roles, err := ListAdminRoles()
+	if err != nil {
+		return err
+	}
+	if len(roles) < len(SystemAdminRoleCatalog()) {
+		return errMissingSystemAdminPolicy
+	}
+
+	permissions, err := ListAdminPermissions()
+	if err != nil {
+		return err
+	}
+	if len(permissions) < len(SystemAdminPermissionCatalog()) {
+		return errMissingSystemAdminPolicy
+	}
+
+	for _, role := range SystemAdminRoleCatalog() {
+		if _, err := GetAdminRoleByKey(role.Key); err != nil {
+			return errMissingSystemAdminPolicy
+		}
+	}
+	for _, permission := range SystemAdminPermissionCatalog() {
+		if _, err := GetAdminPermissionByKey(permission.Key); err != nil {
+			return errMissingSystemAdminPolicy
+		}
+	}
+	return nil
+}
+
 func RoleHasPermission(role, permission string) bool {
-	permissions, ok := rolePermissions[role]
-	if !ok {
+	db := util.GetDB()
+	if db == nil {
 		return false
 	}
-	return permissions[permission]
+
+	var count int64
+	if err := db.Model(&AdminRolePermission{}).
+		Where("role_key = ? AND permission_key = ?", role, permission).
+		Count(&count).Error; err != nil {
+		return false
+	}
+	return count > 0
 }
 
 func ResolveAdminAccess(adminUserID string) (*AdminAccessSummary, error) {
@@ -115,12 +245,27 @@ func ResolveAdminAccess(adminUserID string) (*AdminAccessSummary, error) {
 	}
 
 	roleSet := make(map[string]struct{})
-	permissionSet := make(map[string]struct{})
+	roleKeys := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		if _, ok := roleSet[membership.Role]; ok {
+			continue
+		}
+		roleSet[membership.Role] = struct{}{}
+		roleKeys = append(roleKeys, membership.Role)
+	}
+
+	rolePermissionMap, err := ListAdminRolePermissionsByRoles(roleKeys)
+	if err != nil {
+		return nil, err
+	}
+
 	summary := &AdminAccessSummary{
 		Roles:       []string{},
 		Permissions: []string{},
 		Memberships: make([]AdminMembershipSummary, 0, len(memberships)),
 	}
+	permissionSet := make(map[string]struct{})
+	roleSet = make(map[string]struct{})
 
 	for _, membership := range memberships {
 		if _, ok := roleSet[membership.Role]; !ok {
@@ -133,10 +278,8 @@ func ResolveAdminAccess(adminUserID string) (*AdminAccessSummary, error) {
 			ScopeID:   membership.ScopeID,
 		})
 
-		for _, permission := range allPermissions {
-			if RoleHasPermission(membership.Role, permission) {
-				permissionSet[permission] = struct{}{}
-			}
+		for permission := range rolePermissionMap[membership.Role] {
+			permissionSet[permission] = struct{}{}
 		}
 	}
 

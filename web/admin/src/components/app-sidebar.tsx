@@ -24,6 +24,7 @@ import {
 import {
   LayoutDashboardIcon,
   BotIcon,
+  ShieldUserIcon,
   ShieldCheckIcon,
   UsersIcon,
   LogOutIcon,
@@ -35,6 +36,7 @@ import { useAuth } from "@/components/auth-provider";
 const navItems = [
   { title: "Apps", href: "/", icon: <LayoutDashboardIcon /> },
   { title: "Bots", href: "/bots", icon: <BotIcon /> },
+  { title: "Roles", href: "/roles", icon: <ShieldUserIcon /> },
   { title: "Admins", href: "/admins", icon: <UsersIcon /> },
   { title: "Audit", href: "/audit", icon: <ShieldCheckIcon /> },
 ];
@@ -46,6 +48,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const visibleNavItems = navItems.filter((item) => {
     if (item.href === "/audit") {
       return hasPermission("audit:read");
+    }
+    if (item.href === "/roles") {
+      return hasPermission("admins:manage");
     }
     if (item.href === "/admins") {
       return hasPermission("admins:manage");

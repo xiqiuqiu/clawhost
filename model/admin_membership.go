@@ -63,8 +63,22 @@ func AdminHasPermission(adminUserID, permission, appID string) (bool, error) {
 		return false, err
 	}
 
+	roleSet := make(map[string]struct{})
+	roleKeys := make([]string, 0, len(memberships))
 	for _, membership := range memberships {
-		if !RoleHasPermission(membership.Role, permission) {
+		if _, ok := roleSet[membership.Role]; ok {
+			continue
+		}
+		roleSet[membership.Role] = struct{}{}
+		roleKeys = append(roleKeys, membership.Role)
+	}
+	rolePermissionMap, err := ListAdminRolePermissionsByRoles(roleKeys)
+	if err != nil {
+		return false, err
+	}
+
+	for _, membership := range memberships {
+		if !rolePermissionMap[membership.Role][permission] {
 			continue
 		}
 		if membership.ScopeType == AdminScopePlatform {
@@ -89,16 +103,30 @@ func ResolveAdminAuditAccess(adminUserID string) (*AdminAuditAccess, error) {
 		return nil, err
 	}
 
+	roleSet := make(map[string]struct{})
+	roleKeys := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		if _, ok := roleSet[membership.Role]; ok {
+			continue
+		}
+		roleSet[membership.Role] = struct{}{}
+		roleKeys = append(roleKeys, membership.Role)
+	}
+	rolePermissionMap, err := ListAdminRolePermissionsByRoles(roleKeys)
+	if err != nil {
+		return nil, err
+	}
+
 	access := &AdminAuditAccess{
 		AppIDs: []string{},
 	}
 	appIDSet := make(map[string]struct{})
 
 	for _, membership := range memberships {
-		if !RoleHasPermission(membership.Role, PermissionAuditRead) {
+		if !rolePermissionMap[membership.Role][PermissionAuditRead] {
 			continue
 		}
-		if membership.Role == AdminRolePlatformAdmin && membership.ScopeType == AdminScopePlatform {
+		if membership.ScopeType == AdminScopePlatform {
 			access.CanReadAll = true
 			access.AppIDs = nil
 			return access, nil

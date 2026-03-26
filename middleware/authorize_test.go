@@ -12,8 +12,11 @@ import (
 
 func TestRequirePermission(t *testing.T) {
 	db := setupMiddlewareTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminMembership{}); err != nil {
+	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminMembership{}, &model.AdminRole{}, &model.AdminPermission{}, &model.AdminRolePermission{}); err != nil {
 		t.Fatalf("migrate admin permission models: %v", err)
+	}
+	if err := model.SeedSystemAdminPolicy(); err != nil {
+		t.Fatalf("seed system admin policy: %v", err)
 	}
 
 	admin := &model.AdminUser{
@@ -57,8 +60,11 @@ func TestRequirePermission(t *testing.T) {
 
 func TestRequireAppScope(t *testing.T) {
 	db := setupMiddlewareTestDB(t)
-	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminMembership{}); err != nil {
+	if err := db.AutoMigrate(&model.AdminUser{}, &model.AdminMembership{}, &model.AdminRole{}, &model.AdminPermission{}, &model.AdminRolePermission{}); err != nil {
 		t.Fatalf("migrate admin permission models: %v", err)
+	}
+	if err := model.SeedSystemAdminPolicy(); err != nil {
+		t.Fatalf("seed system admin policy: %v", err)
 	}
 
 	admin := &model.AdminUser{
