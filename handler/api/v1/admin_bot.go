@@ -48,6 +48,33 @@ func resolveAdminBotRuntimeStatus(bot *model.Bot) *model.Bot {
 	return &cloned
 }
 
+func filterBotsForAdminScope(adminUser *model.AdminUser, bots []*model.Bot) ([]*model.Bot, error) {
+	if adminUser == nil {
+		return bots, nil
+	}
+
+	access, err := model.ResolveAdminAccess(adminUser.ID)
+	if err != nil {
+		return nil, err
+	}
+	if access.ScopeMode != model.AdminScopeModeSelectedApps {
+		return bots, nil
+	}
+
+	allowedAppIDs := make(map[string]struct{}, len(access.AppScopeIDs))
+	for _, appID := range access.AppScopeIDs {
+		allowedAppIDs[appID] = struct{}{}
+	}
+
+	filteredBots := make([]*model.Bot, 0, len(bots))
+	for _, bot := range bots {
+		if _, ok := allowedAppIDs[bot.AppID]; ok {
+			filteredBots = append(filteredBots, bot)
+		}
+	}
+	return filteredBots, nil
+}
+
 // AdminCreateBot creates a new bot (admin only)
 func AdminCreateBot(c echo.Context) error {
 	var req struct {
@@ -121,6 +148,11 @@ func AdminListBots(c echo.Context) error {
 	bots, err := model.ListAllBots()
 	if err != nil {
 		return util.InternalError(c, "failed to list bots")
+	}
+	adminUser := authmw.GetAdminUserFromContext(c)
+	bots, err = filterBotsForAdminScope(adminUser, bots)
+	if err != nil {
+		return util.InternalError(c, "failed to resolve admin access")
 	}
 
 	items := make([]*model.Bot, 0, len(bots))

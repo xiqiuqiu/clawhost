@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	authmw "github.com/clawhost/clawhost/middleware"
 	"github.com/clawhost/clawhost/model"
 	auditservice "github.com/clawhost/clawhost/service/audit"
 	"github.com/clawhost/clawhost/service/k8s"
@@ -29,6 +30,11 @@ func RestartAllBots(c echo.Context) error {
 	bots, err := model.ListBotsByStatus(model.BotStatusRunning)
 	if err != nil {
 		return util.InternalError(c, "failed to list running bots")
+	}
+	adminUser := authmw.GetAdminUserFromContext(c)
+	bots, err = filterBotsForAdminScope(adminUser, bots)
+	if err != nil {
+		return util.InternalError(c, "failed to resolve admin access")
 	}
 
 	if len(bots) == 0 {
