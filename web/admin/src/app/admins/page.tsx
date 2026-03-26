@@ -53,7 +53,19 @@ const statusOptions = [
   { value: "disabled", label: "Disabled" },
 ];
 
+const statusFilterOptions = [
+  { value: "active", label: "Active" },
+  { value: "disabled", label: "Disabled" },
+  { value: "all", label: "All Statuses" },
+];
+
 const scopeModeOptions = [
+  { value: "platform", label: "All Apps" },
+  { value: "selected_apps", label: "Selected Apps" },
+];
+
+const scopeFilterOptions = [
+  { value: "all", label: "All Scopes" },
   { value: "platform", label: "All Apps" },
   { value: "selected_apps", label: "Selected Apps" },
 ];
@@ -294,6 +306,11 @@ export default function AdminsPage() {
     scope_mode: "platform",
     app_scope_ids: [],
   });
+  const [filters, setFilters] = useState({
+    query: "",
+    scope: "all",
+    status: "active",
+  });
 
   const fetchAdmins = useCallback(async () => {
     if (!canManageAdmins) {
@@ -400,6 +417,19 @@ export default function AdminsPage() {
     value: role.key,
     label: role.name,
   }));
+  const normalizedQuery = filters.query.trim().toLowerCase();
+  const filteredAdmins = admins.filter((admin) => {
+    const matchesQuery =
+      normalizedQuery === "" ||
+      admin.name.toLowerCase().includes(normalizedQuery) ||
+      admin.email.toLowerCase().includes(normalizedQuery);
+    const matchesScope =
+      filters.scope === "all" || admin.scope_mode === filters.scope;
+    const matchesStatus =
+      filters.status === "all" || admin.status === filters.status;
+
+    return matchesQuery && matchesScope && matchesStatus;
+  });
   const createRoleDisabled = roleOptions.length === 0;
   const createNeedsApps =
     createForm.role !== "platform_admin" && createForm.scope_mode === "selected_apps";
@@ -443,10 +473,101 @@ export default function AdminsPage() {
         </Button>
       </div>
 
+      <div className="rounded-lg border p-4 space-y-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="admin-filter-query">Name or Email</Label>
+            <Input
+              id="admin-filter-query"
+              value={filters.query}
+              onChange={(e) => setFilters({ ...filters, query: e.target.value })}
+              placeholder="Search admins"
+            />
+          </div>
+          <div className="space-y-2 lg:w-56">
+            <Label>Scope</Label>
+            <Select
+              value={filters.scope}
+              onValueChange={(value) => {
+                if (!value) return;
+                setFilters({ ...filters, scope: value });
+              }}
+            >
+              <SelectTrigger className="w-full h-10">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {scopeFilterOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2 lg:w-56">
+            <Label>Status</Label>
+            <Select
+              value={filters.status}
+              onValueChange={(value) => {
+                if (!value) return;
+                setFilters({ ...filters, status: value });
+              }}
+            >
+              <SelectTrigger className="w-full h-10">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {statusFilterOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              setFilters({
+                query: "",
+                scope: "all",
+                status: "active",
+              })
+            }
+            className="lg:w-auto"
+          >
+            Reset Filters
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Showing {filteredAdmins.length} of {admins.length} admins
+        </p>
+      </div>
+
       {loading ? (
         <div className="text-center py-8 text-muted-foreground">Loading...</div>
       ) : admins.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">No admin users yet</div>
+      ) : filteredAdmins.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-8 text-center">
+          <p className="text-sm text-muted-foreground">No admins match the current filters.</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-4"
+            onClick={() =>
+              setFilters({
+                query: "",
+                scope: "all",
+                status: "active",
+              })
+            }
+          >
+            Clear Filters
+          </Button>
+        </div>
       ) : (
         <>
           <div className="hidden md:block border rounded-lg">
@@ -463,7 +584,7 @@ export default function AdminsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {admins.map((admin) => {
+                {filteredAdmins.map((admin) => {
                   const scope = getScopePresentation(admin, apps);
                   return (
                     <TableRow key={admin.id}>
@@ -501,7 +622,7 @@ export default function AdminsPage() {
           </div>
 
           <div className="md:hidden space-y-3">
-            {admins.map((admin) => (
+            {filteredAdmins.map((admin) => (
               <Card key={admin.id}>
                 <CardContent className="p-4">
                   {(() => {
