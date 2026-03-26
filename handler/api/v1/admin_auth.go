@@ -102,9 +102,16 @@ func AdminLogin(c echo.Context) error {
 	if err != nil {
 		return util.InternalError(c, "failed to create admin session")
 	}
+	access, err := model.ResolveAdminAccess(adminUser.ID)
+	if err != nil {
+		return util.InternalError(c, "failed to resolve admin access")
+	}
 
 	return util.Success(c, map[string]interface{}{
 		"admin":         sanitizeAdminUser(adminUser),
+		"roles":         access.Roles,
+		"permissions":   access.Permissions,
+		"memberships":   access.Memberships,
 		"session_token": rawToken,
 		"expires_at":    session.ExpiresAt,
 	})
@@ -127,9 +134,16 @@ func GetCurrentAdmin(c echo.Context) error {
 	if adminUser == nil || session == nil {
 		return util.Unauthorized(c, "admin session not found")
 	}
+	access, err := model.ResolveAdminAccess(adminUser.ID)
+	if err != nil {
+		return util.InternalError(c, "failed to resolve admin access")
+	}
 
 	return util.Success(c, map[string]interface{}{
 		"admin":      sanitizeAdminUser(adminUser),
+		"roles":      access.Roles,
+		"permissions": access.Permissions,
+		"memberships": access.Memberships,
 		"expires_at": session.ExpiresAt,
 	})
 }

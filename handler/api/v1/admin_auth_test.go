@@ -103,6 +103,13 @@ func TestAdminLogin(t *testing.T) {
 	if err := model.CreateAdminUser(admin); err != nil {
 		t.Fatalf("create admin user: %v", err)
 	}
+	if err := model.CreateAdminMembership(&model.AdminMembership{
+		AdminUserID: admin.ID,
+		Role:        model.AdminRolePlatformAdmin,
+		ScopeType:   model.AdminScopePlatform,
+	}); err != nil {
+		t.Fatalf("create admin membership: %v", err)
+	}
 
 	reqBody := map[string]string{
 		"email":    "admin@example.com",
@@ -134,6 +141,10 @@ func TestAdminLogin(t *testing.T) {
 	}
 	if data["session_token"] == "" {
 		t.Fatalf("expected session token in login response, got %#v", data)
+	}
+	permissions, ok := data["permissions"].([]interface{})
+	if !ok || len(permissions) == 0 {
+		t.Fatalf("expected permissions in login response, got %#v", data["permissions"])
 	}
 }
 
@@ -192,6 +203,13 @@ func TestVerifyAdminSession(t *testing.T) {
 	if err := model.CreateAdminUser(admin); err != nil {
 		t.Fatalf("create admin user: %v", err)
 	}
+	if err := model.CreateAdminMembership(&model.AdminMembership{
+		AdminUserID: admin.ID,
+		Role:        model.AdminRoleOperator,
+		ScopeType:   model.AdminScopePlatform,
+	}); err != nil {
+		t.Fatalf("create admin membership: %v", err)
+	}
 
 	session, _, err := model.CreateAdminSession(admin.ID, model.DefaultAdminSessionExpiry())
 	if err != nil {
@@ -210,5 +228,18 @@ func TestVerifyAdminSession(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var resp util.Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode me response: %v", err)
+	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected me response data map, got %#v", resp.Data)
+	}
+	roles, ok := data["roles"].([]interface{})
+	if !ok || len(roles) != 1 {
+		t.Fatalf("expected role summary in me response, got %#v", data["roles"])
 	}
 }

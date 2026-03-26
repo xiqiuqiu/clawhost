@@ -7,8 +7,17 @@ export interface AdminUser {
   name: string;
   status: string;
   is_bootstrap: boolean;
+  roles: string[];
+  permissions: string[];
+  memberships: AdminMembership[];
   created_at: string;
   updated_at: string;
+}
+
+export interface AdminMembership {
+  role: string;
+  scope_type: string;
+  scope_id?: string;
 }
 
 export interface AdminSessionPayload {
@@ -72,16 +81,30 @@ async function request<T>(
 }
 
 export async function loginAdmin(email: string, password: string) {
-  const res = await request<AdminSessionPayload & { session_token: string }>(
+  const res = await request<
+    Omit<AdminSessionPayload, "admin"> & {
+      admin: Omit<AdminUser, "roles" | "permissions" | "memberships">;
+      roles: string[];
+      permissions: string[];
+      memberships: AdminMembership[];
+      session_token: string;
+    }
+  >(
     "/login",
     {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }
   );
-
+  const normalized = normalizeAdminSessionPayload(res.data);
   setStoredSessionToken(res.data.session_token);
-  return res;
+  return {
+    ...res,
+    data: {
+      ...normalized,
+      session_token: res.data.session_token,
+    },
+  };
 }
 
 export async function logoutAdmin() {
@@ -95,7 +118,18 @@ export async function logoutAdmin() {
 }
 
 export async function getCurrentAdmin() {
-  return request<AdminSessionPayload>("/me");
+  const res = await request<
+    Omit<AdminSessionPayload, "admin"> & {
+      admin: Omit<AdminUser, "roles" | "permissions" | "memberships">;
+      roles: string[];
+      permissions: string[];
+      memberships: AdminMembership[];
+    }
+  >("/me");
+  return {
+    ...res,
+    data: normalizeAdminSessionPayload(res.data),
+  };
 }
 
 export function hasStoredSessionToken(): boolean {
@@ -249,4 +283,22 @@ export async function listAuditLogs(filters?: {
 
   const query = params.toString();
   return request<AuditLog[]>(`/audit${query ? `?${query}` : ""}`);
+}
+
+function normalizeAdminSessionPayload(data: {
+  admin: Omit<AdminUser, "roles" | "permissions" | "memberships">;
+  roles?: string[];
+  permissions?: string[];
+  memberships?: AdminMembership[];
+  expires_at: string;
+}) {
+  return {
+    admin: {
+      ...data.admin,
+      roles: data.roles || [],
+      permissions: data.permissions || [],
+      memberships: data.memberships || [],
+    },
+    expires_at: data.expires_at,
+  };
 }

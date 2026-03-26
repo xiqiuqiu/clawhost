@@ -23,6 +23,8 @@ interface AuthContextType {
   isAuthed: boolean;
   verifying: boolean;
   expiresAt: string | null;
+  hasPermission: (permission: string) => boolean;
+  roleSummary: string;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
 }
@@ -32,6 +34,8 @@ const AuthContext = createContext<AuthContextType>({
   isAuthed: false,
   verifying: true,
   expiresAt: null,
+  hasPermission: () => false,
+  roleSummary: "",
   login: async () => false,
   logout: async () => {},
 });
@@ -94,9 +98,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAuthed(false);
   }, []);
 
+  const hasPermission = useCallback(
+    (permission: string) => admin?.permissions.includes(permission) ?? false,
+    [admin]
+  );
+
+  const roleSummary = admin?.roles.length
+    ? admin.roles.map((role) => role.replaceAll("_", " ")).join(", ")
+    : "";
+
   return (
     <AuthContext.Provider
-      value={{ admin, isAuthed, verifying, expiresAt, login, logout }}
+      value={{
+        admin,
+        isAuthed,
+        verifying,
+        expiresAt,
+        hasPermission,
+        roleSummary,
+        login,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

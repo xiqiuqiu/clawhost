@@ -76,11 +76,19 @@ function BotActions({
   actionLoading,
   onAction,
   onDelete,
+  canStart,
+  canStop,
+  canDelete,
+  canUpgrade,
 }: {
   bot: Bot;
   actionLoading: string | null;
   onAction: (action: () => Promise<unknown>, msg: string, id: string) => void;
   onDelete: () => void;
+  canStart: boolean;
+  canStop: boolean;
+  canDelete: boolean;
+  canUpgrade: boolean;
 }) {
   return (
     <DropdownMenu>
@@ -91,25 +99,27 @@ function BotActions({
         ...
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {bot.status !== "running" && (
+        {canStart && bot.status !== "running" && (
           <DropdownMenuItem
             onClick={() => onAction(() => startBot(bot.id), "Bot started", bot.id)}
           >
             Start
           </DropdownMenuItem>
         )}
-        {bot.status === "running" && (
+        {canStop && bot.status === "running" && (
           <DropdownMenuItem
             onClick={() => onAction(() => stopBot(bot.id), "Bot stopped", bot.id)}
           >
             Stop
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem
-          onClick={() => onAction(() => upgradeBot(bot.id), "Bot upgraded", bot.id)}
-        >
-          Upgrade
-        </DropdownMenuItem>
+        {canUpgrade ? (
+          <DropdownMenuItem
+            onClick={() => onAction(() => upgradeBot(bot.id), "Bot upgraded", bot.id)}
+          >
+            Upgrade
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem
           onClick={() => {
             navigator.clipboard.writeText(bot.id);
@@ -127,16 +137,23 @@ function BotActions({
           Copy Token
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onClick={onDelete}>
-          Delete
-        </DropdownMenuItem>
+        {canDelete ? (
+          <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+            Delete
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
 export default function BotsPage() {
-  const { isAuthed } = useAuth();
+  const { isAuthed, hasPermission } = useAuth();
+  const canCreateBot = hasPermission("bots:create");
+  const canStartBot = hasPermission("bots:start");
+  const canStopBot = hasPermission("bots:stop");
+  const canDeleteBot = hasPermission("bots:delete");
+  const canUpgradeBot = hasPermission("bots:upgrade");
   const [bots, setBots] = useState<Bot[]>([]);
   const [appMap, setAppMap] = useState<Record<string, App>>({});
   const [globalDomainTemplate, setGlobalDomainTemplate] = useState("");
@@ -281,15 +298,21 @@ export default function BotsPage() {
               <SelectItem value="error">Error</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" onClick={() => setShowCreateDialog(true)}>
-            Create Bot
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setBulkAction("upgrade")}>
-            Upgrade All
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setBulkAction("restart")}>
-            Restart All
-          </Button>
+          {canCreateBot ? (
+            <Button size="sm" onClick={() => setShowCreateDialog(true)}>
+              Create Bot
+            </Button>
+          ) : null}
+          {canUpgradeBot ? (
+            <Button variant="outline" size="sm" onClick={() => setBulkAction("upgrade")}>
+              Upgrade All
+            </Button>
+          ) : null}
+          {canUpgradeBot ? (
+            <Button variant="outline" size="sm" onClick={() => setBulkAction("restart")}>
+              Restart All
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -356,6 +379,10 @@ export default function BotsPage() {
                         actionLoading={actionLoading}
                         onAction={handleAction}
                         onDelete={() => setDeleteTarget(bot)}
+                        canStart={canStartBot}
+                        canStop={canStopBot}
+                        canDelete={canDeleteBot}
+                        canUpgrade={canUpgradeBot}
                       />
                     </TableCell>
                   </TableRow>
@@ -386,6 +413,10 @@ export default function BotsPage() {
                       actionLoading={actionLoading}
                       onAction={handleAction}
                       onDelete={() => setDeleteTarget(bot)}
+                      canStart={canStartBot}
+                      canStop={canStopBot}
+                      canDelete={canDeleteBot}
+                      canUpgrade={canUpgradeBot}
                     />
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-muted-foreground">
@@ -426,7 +457,7 @@ export default function BotsPage() {
       )}
 
       {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+      <AlertDialog open={!!deleteTarget && canDeleteBot} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent className="max-w-[95vw] sm:max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Bot</AlertDialogTitle>
@@ -444,7 +475,7 @@ export default function BotsPage() {
       </AlertDialog>
 
       {/* Bulk Action Confirmation */}
-      <AlertDialog open={!!bulkAction} onOpenChange={() => setBulkAction(null)}>
+      <AlertDialog open={!!bulkAction && canUpgradeBot} onOpenChange={() => setBulkAction(null)}>
         <AlertDialogContent className="max-w-[95vw] sm:max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -466,7 +497,7 @@ export default function BotsPage() {
       </AlertDialog>
 
       {/* Create Bot Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+      <Dialog open={showCreateDialog && canCreateBot} onOpenChange={setShowCreateDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Create Bot</DialogTitle>

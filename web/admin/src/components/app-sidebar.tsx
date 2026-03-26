@@ -39,7 +39,17 @@ const navItems = [
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
-  const { admin, logout } = useAuth();
+  const { admin, logout, hasPermission, roleSummary } = useAuth();
+
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.href === "/audit") {
+      return hasPermission("audit:read");
+    }
+    if (item.href === "/bots") {
+      return hasPermission("bots:read");
+    }
+    return hasPermission("apps:read");
+  });
 
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -68,7 +78,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarGroupLabel>Management</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const isActive =
                   item.href === "/"
                     ? pathname === "/" || pathname === ""
@@ -117,7 +127,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 sideOffset={4}
               >
                 <DropdownMenuItem disabled>
-                  {admin?.status === "active" ? "Active Admin" : admin?.status}
+                  {roleSummary || (admin?.status === "active" ? "Active Admin" : admin?.status)}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

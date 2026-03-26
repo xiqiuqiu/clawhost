@@ -53,19 +53,27 @@ function AppActions({
   onEdit,
   onResetToken,
   onDelete,
+  canEdit,
+  canResetToken,
+  canDelete,
 }: {
   app: App;
   onEdit: () => void;
   onResetToken: () => void;
   onDelete: () => void;
+  canEdit: boolean;
+  canResetToken: boolean;
+  canDelete: boolean;
 }) {
+  const hasDangerousAction = canEdit || canResetToken || canDelete;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium h-8 px-2 hover:bg-accent hover:text-accent-foreground">
         ...
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+        {canEdit ? <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem> : null}
         <DropdownMenuItem
           onClick={() => {
             navigator.clipboard.writeText(app.api_token);
@@ -74,22 +82,24 @@ function AppActions({
         >
           Copy Token
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={onResetToken}>
-          Reset Token
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="text-destructive"
-          onClick={onDelete}
-        >
-          Delete
-        </DropdownMenuItem>
+        {canResetToken ? <DropdownMenuItem onClick={onResetToken}>Reset Token</DropdownMenuItem> : null}
+        {canDelete ? (
+          <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+            Delete
+          </DropdownMenuItem>
+        ) : null}
+        {!hasDangerousAction ? null : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
 export default function AppsPage() {
-  const { isAuthed } = useAuth();
+  const { isAuthed, hasPermission } = useAuth();
+  const canCreateApp = hasPermission("apps:create");
+  const canUpdateApp = hasPermission("apps:update");
+  const canDeleteApp = hasPermission("apps:delete");
+  const canResetAppToken = hasPermission("apps:token_reset");
   const [apps, setApps] = useState<App[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -200,9 +210,11 @@ export default function AppsPage() {
             Manage application instances
           </p>
         </div>
-        <Button onClick={() => setShowCreate(true)} className="shrink-0">
-          Create App
-        </Button>
+        {canCreateApp ? (
+          <Button onClick={() => setShowCreate(true)} className="shrink-0">
+            Create App
+          </Button>
+        ) : null}
       </div>
 
       {loading ? (
@@ -259,6 +271,9 @@ export default function AppsPage() {
                         onEdit={() => openEdit(app)}
                         onResetToken={() => handleResetToken(app)}
                         onDelete={() => setDeleteTarget(app)}
+                        canEdit={canUpdateApp}
+                        canResetToken={canResetAppToken}
+                        canDelete={canDeleteApp}
                       />
                     </TableCell>
                   </TableRow>
@@ -294,6 +309,9 @@ export default function AppsPage() {
                       onEdit={() => openEdit(app)}
                       onResetToken={() => handleResetToken(app)}
                       onDelete={() => setDeleteTarget(app)}
+                      canEdit={canUpdateApp}
+                      canResetToken={canResetAppToken}
+                      canDelete={canDeleteApp}
                     />
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
@@ -320,7 +338,7 @@ export default function AppsPage() {
       )}
 
       {/* Create Dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      <Dialog open={showCreate && canCreateApp} onOpenChange={setShowCreate}>
         <DialogContent className="max-w-[95vw] sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Create App</DialogTitle>
@@ -378,7 +396,7 @@ export default function AppsPage() {
       </Dialog>
 
       {/* Edit Dialog */}
-      <Dialog open={!!editApp} onOpenChange={() => setEditApp(null)}>
+      <Dialog open={!!editApp && canUpdateApp} onOpenChange={() => setEditApp(null)}>
         <DialogContent className="max-w-[95vw] sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit App</DialogTitle>
@@ -450,7 +468,7 @@ export default function AppsPage() {
       </Dialog>
 
       {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+      <AlertDialog open={!!deleteTarget && canDeleteApp} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent className="max-w-[95vw] sm:max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete App</AlertDialogTitle>
