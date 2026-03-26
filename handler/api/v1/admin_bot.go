@@ -11,6 +11,37 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+var getAdminDeploymentStatusInfoFn = func(botID string) (*k8s.DeploymentStatusInfo, error) {
+	return k8s.GetDeploymentStatusInfo(context.Background(), botID)
+}
+
+func resolveAdminBotRuntimeStatus(bot *model.Bot) *model.Bot {
+	cloned := *bot
+
+	if bot.Status == model.BotStatusCreated || bot.Status == model.BotStatusStopped {
+		return &cloned
+	}
+
+	statusInfo, err := getAdminDeploymentStatusInfoFn(bot.ID)
+	if err != nil || statusInfo == nil {
+		return &cloned
+	}
+
+	switch statusInfo.Status {
+	case "ready":
+		cloned.Status = model.BotStatusRunning
+	case "starting", "updating", "not_ready":
+		cloned.Status = model.BotStatusStarting
+	case "not_found":
+		if bot.Status == model.BotStatusRunning {
+			cloned.Status = model.BotStatusStopped
+			cloned.Endpoint = ""
+		}
+	}
+
+	return &cloned
+}
+
 // AdminCreateBot creates a new bot (admin only)
 func AdminCreateBot(c echo.Context) error {
 	var req struct {
@@ -85,7 +116,13 @@ func AdminListBots(c echo.Context) error {
 	if err != nil {
 		return util.InternalError(c, "failed to list bots")
 	}
-	return util.Success(c, bots)
+
+	items := make([]*model.Bot, 0, len(bots))
+	for _, bot := range bots {
+		items = append(items, resolveAdminBotRuntimeStatus(bot))
+	}
+
+	return util.Success(c, items)
 }
 
 // AdminStartBot starts a bot by ID (admin only)
