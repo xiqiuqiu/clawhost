@@ -1,12 +1,20 @@
 package model
 
 import (
+	"sort"
 	"time"
 
 	"github.com/clawhost/clawhost/util"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+type AdminMembershipGrant struct {
+	Role       string
+	RoleKeys    []string
+	ScopeMode  string
+	AppScopeIDs []string
+}
 
 type AdminMembership struct {
 	ID          string    `json:"id" gorm:"primaryKey;type:varchar(36)"`
@@ -57,22 +65,69 @@ func ReplaceAdminMemberships(adminUserID string, memberships []*AdminMembership)
 	})
 }
 
+func ResolveAdminMembershipGrant(memberships []*AdminMembership) (*AdminMembershipGrant, error) {
+	grant := &AdminMembershipGrant{
+		RoleKeys:    []string{},
+		ScopeMode:   AdminScopeModePlatform,
+		AppScopeIDs: []string{},
+	}
+	if len(memberships) == 0 {
+		return grant, nil
+	}
+
+	roleSet := make(map[string]struct{})
+	appIDSet := make(map[string]struct{})
+	hasPlatformScope := false
+
+	for _, membership := range memberships {
+		if membership == nil {
+			continue
+		}
+		if membership.Role == "" {
+			continue
+		}
+		if grant.Role == "" {
+			grant.Role = membership.Role
+		} else if grant.Role != membership.Role {
+			return nil, ErrAdminMembershipMixedRoles
+		}
+		if _, ok := roleSet[membership.Role]; !ok {
+			roleSet[membership.Role] = struct{}{}
+			grant.RoleKeys = append(grant.RoleKeys, membership.Role)
+		}
+		if membership.ScopeType == AdminScopePlatform {
+			hasPlatformScope = true
+			continue
+		}
+		if membership.ScopeType == AdminScopeApp && membership.ScopeID != "" {
+			if _, ok := appIDSet[membership.ScopeID]; ok {
+				continue
+			}
+			appIDSet[membership.ScopeID] = struct{}{}
+			grant.AppScopeIDs = append(grant.AppScopeIDs, membership.ScopeID)
+		}
+	}
+
+	if !hasPlatformScope && len(grant.AppScopeIDs) > 0 {
+		grant.ScopeMode = AdminScopeModeSelectedApps
+	}
+
+	sort.Strings(grant.RoleKeys)
+	sort.Strings(grant.AppScopeIDs)
+	return grant, nil
+}
+
 func AdminHasPermission(adminUserID, permission, appID string) (bool, error) {
 	memberships, err := ListAdminMembershipsByUser(adminUserID)
 	if err != nil {
 		return false, err
 	}
 
-	roleSet := make(map[string]struct{})
-	roleKeys := make([]string, 0, len(memberships))
-	for _, membership := range memberships {
-		if _, ok := roleSet[membership.Role]; ok {
-			continue
-		}
-		roleSet[membership.Role] = struct{}{}
-		roleKeys = append(roleKeys, membership.Role)
+	grant, err := ResolveAdminMembershipGrant(memberships)
+	if err != nil {
+		return false, err
 	}
-	rolePermissionMap, err := ListAdminRolePermissionsByRoles(roleKeys)
+	rolePermissionMap, err := ListAdminRolePermissionsByRoles(grant.RoleKeys)
 	if err != nil {
 		return false, err
 	}
@@ -103,16 +158,11 @@ func ResolveAdminAuditAccess(adminUserID string) (*AdminAuditAccess, error) {
 		return nil, err
 	}
 
-	roleSet := make(map[string]struct{})
-	roleKeys := make([]string, 0, len(memberships))
-	for _, membership := range memberships {
-		if _, ok := roleSet[membership.Role]; ok {
-			continue
-		}
-		roleSet[membership.Role] = struct{}{}
-		roleKeys = append(roleKeys, membership.Role)
+	grant, err := ResolveAdminMembershipGrant(memberships)
+	if err != nil {
+		return nil, err
 	}
-	rolePermissionMap, err := ListAdminRolePermissionsByRoles(roleKeys)
+	rolePermissionMap, err := ListAdminRolePermissionsByRoles(grant.RoleKeys)
 	if err != nil {
 		return nil, err
 	}

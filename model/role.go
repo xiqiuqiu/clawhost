@@ -14,6 +14,11 @@ const (
 )
 
 const (
+	AdminScopeModePlatform     = "platform"
+	AdminScopeModeSelectedApps = "selected_apps"
+)
+
+const (
 	AdminRolePlatformAdmin = "platform_admin"
 	AdminRoleAppAdmin      = "app_admin"
 	AdminRoleOperator      = "operator"
@@ -46,9 +51,12 @@ type AdminAccessSummary struct {
 	Roles       []string                 `json:"roles"`
 	Permissions []string                 `json:"permissions"`
 	Memberships []AdminMembershipSummary `json:"memberships"`
+	ScopeMode   string                   `json:"scope_mode"`
+	AppScopeIDs []string                 `json:"app_scope_ids,omitempty"`
 }
 
 var errMissingSystemAdminPolicy = errors.New("missing system admin policy")
+var ErrAdminMembershipMixedRoles = errors.New("admin memberships must use a single role")
 
 func SystemAdminRoleCatalog() []AdminRole {
 	return []AdminRole{
@@ -244,17 +252,12 @@ func ResolveAdminAccess(adminUserID string) (*AdminAccessSummary, error) {
 		return nil, err
 	}
 
-	roleSet := make(map[string]struct{})
-	roleKeys := make([]string, 0, len(memberships))
-	for _, membership := range memberships {
-		if _, ok := roleSet[membership.Role]; ok {
-			continue
-		}
-		roleSet[membership.Role] = struct{}{}
-		roleKeys = append(roleKeys, membership.Role)
+	grant, err := ResolveAdminMembershipGrant(memberships)
+	if err != nil {
+		return nil, err
 	}
 
-	rolePermissionMap, err := ListAdminRolePermissionsByRoles(roleKeys)
+	rolePermissionMap, err := ListAdminRolePermissionsByRoles(grant.RoleKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -263,9 +266,11 @@ func ResolveAdminAccess(adminUserID string) (*AdminAccessSummary, error) {
 		Roles:       []string{},
 		Permissions: []string{},
 		Memberships: make([]AdminMembershipSummary, 0, len(memberships)),
+		ScopeMode:   grant.ScopeMode,
+		AppScopeIDs: grant.AppScopeIDs,
 	}
 	permissionSet := make(map[string]struct{})
-	roleSet = make(map[string]struct{})
+	roleSet := make(map[string]struct{})
 
 	for _, membership := range memberships {
 		if _, ok := roleSet[membership.Role]; !ok {
