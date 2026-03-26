@@ -39,6 +39,12 @@ func resolveAdminBotRuntimeStatus(bot *model.Bot) *model.Bot {
 		}
 	}
 
+	if cloned.Status != bot.Status || cloned.Endpoint != bot.Endpoint {
+		if err := model.UpdateBot(&cloned); err != nil {
+			return &cloned
+		}
+	}
+
 	return &cloned
 }
 

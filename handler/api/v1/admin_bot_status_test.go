@@ -70,4 +70,12 @@ func TestAdminListBotsPrefersRuntimeStartingStatus(t *testing.T) {
 	if item["status"] != string(model.BotStatusStarting) {
 		t.Fatalf("expected starting status, got %#v", item["status"])
 	}
+
+	storedBot, err := model.GetBotByID(bot.ID)
+	if err != nil {
+		t.Fatalf("reload bot: %v", err)
+	}
+	if storedBot.Status != model.BotStatusStarting {
+		t.Fatalf("expected database status to sync to starting, got %s", storedBot.Status)
+	}
 }
