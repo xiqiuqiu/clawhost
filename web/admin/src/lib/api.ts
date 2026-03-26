@@ -10,6 +10,8 @@ export interface AdminUser {
   roles: string[];
   permissions: string[];
   memberships: AdminMembership[];
+  scope_mode: string;
+  app_scope_ids: string[];
   created_at: string;
   updated_at: string;
 }
@@ -165,6 +167,8 @@ export async function createManagedAdminUser(data: {
   name: string;
   password: string;
   role: string;
+  scope_mode?: string;
+  app_scope_ids?: string[];
 }) {
   return request<ManagedAdminUser>("/admin-users", {
     method: "POST",
@@ -179,6 +183,8 @@ export async function updateManagedAdminUser(
     status?: string;
     role?: string;
     password?: string;
+    scope_mode?: string;
+    app_scope_ids?: string[];
   }
 ) {
   return request<ManagedAdminUser>(`/admin-users/${id}`, {
@@ -371,6 +377,8 @@ function normalizeAdminSessionPayload(data: {
       roles: data.roles || [],
       permissions: data.permissions || [],
       memberships: data.memberships || [],
+      scope_mode: data.admin.scope_mode || "platform",
+      app_scope_ids: data.admin.app_scope_ids || [],
     },
     expires_at: data.expires_at,
   };
