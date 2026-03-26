@@ -67,6 +67,11 @@ type AdminFormState = {
   app_scope_ids: string[];
 };
 
+type ScopePresentation = {
+  label: string;
+  detail: string;
+};
+
 function formatRole(role: string, roles: AdminRole[]) {
   return roles.find((item) => item.key === role)?.name || role;
 }
@@ -81,19 +86,30 @@ function toggleSelection(items: string[], value: string) {
     : [...items, value];
 }
 
-function formatScope(admin: ManagedAdminUser, apps: App[]) {
+function getScopePresentation(admin: ManagedAdminUser, apps: App[]): ScopePresentation {
   if (admin.scope_mode !== "selected_apps") {
-    return "All Apps";
+    return {
+      label: "All Apps",
+      detail: "Can access every app on the platform.",
+    };
   }
   if (!admin.app_scope_ids.length) {
-    return "No apps";
+    return {
+      label: "Selected Apps",
+      detail: "No apps selected yet.",
+    };
   }
 
-  const names = admin.app_scope_ids
+  const resolvedNames = admin.app_scope_ids
     .map((appId) => apps.find((app) => app.id === appId)?.name || appId)
-    .slice(0, 2);
-  const suffix = admin.app_scope_ids.length > 2 ? ` +${admin.app_scope_ids.length - 2}` : "";
-  return `${names.join(", ")}${suffix}`;
+    .filter(Boolean);
+  const previewNames = resolvedNames.slice(0, 3).join(", ");
+  const remaining = resolvedNames.length > 3 ? ` +${resolvedNames.length - 3} more` : "";
+
+  return {
+    label: `${resolvedNames.length} selected ${resolvedNames.length === 1 ? "app" : "apps"}`,
+    detail: `${previewNames}${remaining}`,
+  };
 }
 
 function AdminActions({ onEdit }: { onEdit: () => void }) {
@@ -120,8 +136,13 @@ function AppScopeFields({
   form: AdminFormState;
   onChange: (next: AdminFormState) => void;
 }) {
+  const [search, setSearch] = useState("");
   const forcePlatformScope = form.role === "platform_admin";
   const selectedScopeMode = forcePlatformScope ? "platform" : form.scope_mode;
+  const filteredApps = apps.filter((app) =>
+    app.name.toLowerCase().includes(search.trim().toLowerCase())
+  );
+  const selectedApps = apps.filter((app) => form.app_scope_ids.includes(app.id));
 
   return (
     <>
@@ -150,16 +171,68 @@ function AppScopeFields({
             ))}
           </SelectContent>
         </Select>
+        <p className="text-xs text-muted-foreground">
+          {forcePlatformScope
+            ? "Platform admins always have access to every app."
+            : selectedScopeMode === "selected_apps"
+              ? "This admin will only see and operate the apps selected below."
+              : "This admin can access every app allowed by their role."}
+        </p>
       </div>
 
       {!forcePlatformScope && selectedScopeMode === "selected_apps" ? (
         <div className="space-y-2">
-          <Label>Selected Apps</Label>
+          <div className="flex items-center justify-between gap-3">
+            <Label>Selected Apps</Label>
+            <Badge variant="outline">
+              {form.app_scope_ids.length} / {apps.length}
+            </Badge>
+          </div>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search apps"
+            disabled={disabled || apps.length === 0}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                onChange({
+                  ...form,
+                  app_scope_ids: Array.from(
+                    new Set([...form.app_scope_ids, ...filteredApps.map((app) => app.id)])
+                  ),
+                })
+              }
+              disabled={disabled || filteredApps.length === 0}
+            >
+              Select Visible
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                onChange({
+                  ...form,
+                  app_scope_ids: [],
+                })
+              }
+              disabled={disabled || form.app_scope_ids.length === 0}
+            >
+              Clear
+            </Button>
+          </div>
           <div className="max-h-40 overflow-y-auto rounded-md border p-3 space-y-3">
             {apps.length === 0 ? (
               <p className="text-sm text-muted-foreground">No apps available</p>
+            ) : filteredApps.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No apps match this search</p>
             ) : (
-              apps.map((app) => (
+              filteredApps.map((app) => (
                 <label key={app.id} className="flex items-center gap-3 text-sm">
                   <Checkbox
                     checked={form.app_scope_ids.includes(app.id)}
@@ -174,6 +247,20 @@ function AppScopeFields({
                   <span>{app.name}</span>
                 </label>
               ))
+            )}
+          </div>
+          <div className="rounded-md border border-dashed p-3">
+            <p className="text-xs font-medium text-muted-foreground">Current access</p>
+            {selectedApps.length === 0 ? (
+              <p className="mt-2 text-sm text-muted-foreground">No apps selected yet.</p>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {selectedApps.map((app) => (
+                  <Badge key={app.id} variant="secondary">
+                    {app.name}
+                  </Badge>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -376,33 +463,39 @@ export default function AdminsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {admins.map((admin) => (
-                  <TableRow key={admin.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{admin.name}</span>
-                        {admin.is_bootstrap ? <Badge variant="secondary">Bootstrap</Badge> : null}
-                        {currentAdmin?.id === admin.id ? <Badge variant="outline">You</Badge> : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm">{admin.email}</TableCell>
-                    <TableCell>{formatRole(admin.roles[0] || "viewer", roles)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatScope(admin, apps)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={admin.status === "active" ? "default" : "secondary"}>
-                        {formatStatus(admin.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {new Date(admin.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      <AdminActions onEdit={() => openEdit(admin)} />
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {admins.map((admin) => {
+                  const scope = getScopePresentation(admin, apps);
+                  return (
+                    <TableRow key={admin.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{admin.name}</span>
+                          {admin.is_bootstrap ? <Badge variant="secondary">Bootstrap</Badge> : null}
+                          {currentAdmin?.id === admin.id ? <Badge variant="outline">You</Badge> : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm">{admin.email}</TableCell>
+                      <TableCell>{formatRole(admin.roles[0] || "viewer", roles)}</TableCell>
+                      <TableCell className="text-sm">
+                        <div className="space-y-1">
+                          <div className="font-medium">{scope.label}</div>
+                          <div className="text-muted-foreground">{scope.detail}</div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={admin.status === "active" ? "default" : "secondary"}>
+                          {formatStatus(admin.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {new Date(admin.created_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        <AdminActions onEdit={() => openEdit(admin)} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -411,25 +504,29 @@ export default function AdminsPage() {
             {admins.map((admin) => (
               <Card key={admin.id}>
                 <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium truncate">{admin.name}</span>
-                        <Badge variant={admin.status === "active" ? "default" : "secondary"}>
-                          {formatStatus(admin.status)}
-                        </Badge>
-                        {admin.is_bootstrap ? <Badge variant="secondary">Bootstrap</Badge> : null}
+                  {(() => {
+                    const scope = getScopePresentation(admin, apps);
+                    return (
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium truncate">{admin.name}</span>
+                            <Badge variant={admin.status === "active" ? "default" : "secondary"}>
+                              {formatStatus(admin.status)}
+                            </Badge>
+                            {admin.is_bootstrap ? <Badge variant="secondary">Bootstrap</Badge> : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1 truncate">{admin.email}</p>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            {formatRole(admin.roles[0] || "viewer", roles)}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">{scope.label}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{scope.detail}</p>
+                        </div>
+                        <AdminActions onEdit={() => openEdit(admin)} />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1 truncate">{admin.email}</p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {formatRole(admin.roles[0] || "viewer", roles)}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {formatScope(admin, apps)}
-                      </p>
-                    </div>
-                    <AdminActions onEdit={() => openEdit(admin)} />
-                  </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             ))}
