@@ -474,8 +474,8 @@ export default function AdminsPage() {
       </div>
 
       <div className="rounded-lg border p-4 space-y-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-          <div className="space-y-2 flex-1">
+        <div className="grid gap-4 xl:grid-cols-[minmax(280px,360px)_220px_220px_max-content] xl:items-end">
+          <div className="space-y-2">
             <Label htmlFor="admin-filter-query">Name or Email</Label>
             <Input
               id="admin-filter-query"
@@ -484,7 +484,7 @@ export default function AdminsPage() {
               placeholder="Search admins"
             />
           </div>
-          <div className="space-y-2 lg:w-56">
+          <div className="space-y-2">
             <Label>Scope</Label>
             <Select
               value={filters.scope}
@@ -505,7 +505,7 @@ export default function AdminsPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2 lg:w-56">
+          <div className="space-y-2">
             <Label>Status</Label>
             <Select
               value={filters.status}
@@ -536,7 +536,7 @@ export default function AdminsPage() {
                 status: "active",
               })
             }
-            className="lg:w-auto"
+            className="justify-self-start xl:self-end"
           >
             Reset Filters
           </Button>
