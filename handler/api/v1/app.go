@@ -3,6 +3,7 @@ package v1
 import (
 	"github.com/clawhost/clawhost/middleware"
 	"github.com/clawhost/clawhost/model"
+	auditservice "github.com/clawhost/clawhost/service/audit"
 	"github.com/clawhost/clawhost/util"
 	"github.com/labstack/echo/v4"
 )
@@ -56,6 +57,17 @@ func CreateApp(c echo.Context) error {
 	if err := model.CreateApp(app); err != nil {
 		return util.InternalError(c, "failed to create app")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       app.ID,
+		Action:      "app.create",
+		TargetType:  "app",
+		TargetID:    app.ID,
+		TargetLabel: app.Name,
+		Result:      model.AuditResultSuccess,
+		Metadata: map[string]interface{}{
+			"owner_email": adminSafeOwnerEmail(app.OwnerEmail),
+		},
+	})
 
 	return util.Success(c, app)
 }
@@ -124,6 +136,14 @@ func UpdateApp(c echo.Context) error {
 	if err := model.UpdateApp(app); err != nil {
 		return util.InternalError(c, "failed to update app")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       app.ID,
+		Action:      "app.update",
+		TargetType:  "app",
+		TargetID:    app.ID,
+		TargetLabel: app.Name,
+		Result:      model.AuditResultSuccess,
+	})
 
 	return util.Success(c, app)
 }
@@ -142,6 +162,14 @@ func DeleteApp(c echo.Context) error {
 	if err := model.DeleteApp(id); err != nil {
 		return util.InternalError(c, "failed to delete app")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       id,
+		Action:      "app.delete",
+		TargetType:  "app",
+		TargetID:    id,
+		TargetLabel: "",
+		Result:      model.AuditResultSuccess,
+	})
 
 	return util.Success(c, map[string]string{"message": "app deleted"})
 }
@@ -161,6 +189,17 @@ func ResetAppToken(c echo.Context) error {
 	if err != nil {
 		return util.InternalError(c, "failed to reset token")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       id,
+		Action:      "app.reset_token",
+		TargetType:  "app",
+		TargetID:    id,
+		Result:      model.AuditResultSuccess,
+	})
 
 	return util.Success(c, map[string]string{"api_token": newToken})
+}
+
+func adminSafeOwnerEmail(email string) string {
+	return email
 }

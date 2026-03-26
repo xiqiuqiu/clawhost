@@ -99,5 +99,5 @@ func ResetAppAPIToken(id string) (string, error) {
 
 // AutoMigrateApp creates the apps table if it doesn't exist
 func AutoMigrateApp() error {
-	return util.GetDB().AutoMigrate(&App{}, &AdminUser{}, &AdminSession{}, &AdminMembership{})
+	return util.GetDB().AutoMigrate(&App{}, &AdminUser{}, &AdminSession{}, &AdminMembership{}, &AuditLog{})
 }

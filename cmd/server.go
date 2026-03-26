@@ -184,6 +184,7 @@ func startServer() {
 		admin.PUT("/apps/:id", v1.UpdateApp, authmw.RequireAppPermission(model.PermissionAppsUpdate, resolveAppIDFromParam))
 		admin.DELETE("/apps/:id", v1.DeleteApp, authmw.RequireAppPermission(model.PermissionAppsDelete, resolveAppIDFromParam))
 		admin.POST("/apps/:id/reset-token", v1.ResetAppToken, authmw.RequireAppPermission(model.PermissionAppsTokenReset, resolveAppIDFromParam))
+		admin.GET("/audit", v1.ListAdminAuditLogs, authmw.RequirePermission(model.PermissionAuditRead))
 
 		// Bot management (admin)
 		admin.POST("/bots", v1.AdminCreateBot)

@@ -24,6 +24,7 @@ const (
 	PermissionBotsStop       = "bots:stop"
 	PermissionBotsDelete     = "bots:delete"
 	PermissionBotsUpgrade    = "bots:upgrade"
+	PermissionAuditRead      = "audit:read"
 )
 
 var rolePermissions = map[string]map[string]bool{
@@ -39,6 +40,7 @@ var rolePermissions = map[string]map[string]bool{
 		PermissionBotsStop:       true,
 		PermissionBotsDelete:     true,
 		PermissionBotsUpgrade:    true,
+		PermissionAuditRead:      true,
 	},
 	AdminRoleAppAdmin: {
 		PermissionAppsRead:       true,
@@ -57,10 +59,12 @@ var rolePermissions = map[string]map[string]bool{
 		PermissionBotsStart:   true,
 		PermissionBotsStop:    true,
 		PermissionBotsUpgrade: true,
+		PermissionAuditRead:   true,
 	},
 	AdminRoleViewer: {
-		PermissionAppsRead: true,
-		PermissionBotsRead: true,
+		PermissionAppsRead:  true,
+		PermissionBotsRead:  true,
+		PermissionAuditRead: true,
 	},
 }
 

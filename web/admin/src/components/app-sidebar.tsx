@@ -24,6 +24,7 @@ import {
 import {
   LayoutDashboardIcon,
   BotIcon,
+  ShieldCheckIcon,
   LogOutIcon,
   EllipsisVerticalIcon,
   CircleUserRoundIcon,
@@ -33,6 +34,7 @@ import { useAuth } from "@/components/auth-provider";
 const navItems = [
   { title: "Apps", href: "/", icon: <LayoutDashboardIcon /> },
   { title: "Bots", href: "/bots", icon: <BotIcon /> },
+  { title: "Audit", href: "/audit", icon: <ShieldCheckIcon /> },
 ];
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {

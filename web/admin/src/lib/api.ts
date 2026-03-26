@@ -16,6 +16,23 @@ export interface AdminSessionPayload {
   expires_at: string;
 }
 
+export interface AuditLog {
+  id: string;
+  actor_admin_id: string;
+  actor_email: string;
+  app_id: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  result: string;
+  source_ip: string;
+  user_agent: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 function getStoredSessionToken(): string {
   if (typeof window === "undefined") return "";
   return localStorage.getItem(SESSION_STORAGE_KEY) || "";
@@ -214,4 +231,22 @@ export async function restartAllBots() {
 // Config APIs
 export async function getAdminConfig() {
   return request<{ bot_domain_template: string }>("/config");
+}
+
+export async function listAuditLogs(filters?: {
+  actor?: string;
+  app_id?: string;
+  action?: string;
+  result?: string;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (filters?.actor) params.set("actor", filters.actor);
+  if (filters?.app_id) params.set("app_id", filters.app_id);
+  if (filters?.action) params.set("action", filters.action);
+  if (filters?.result) params.set("result", filters.result);
+  if (filters?.limit) params.set("limit", String(filters.limit));
+
+  const query = params.toString();
+  return request<AuditLog[]>(`/audit${query ? `?${query}` : ""}`);
 }

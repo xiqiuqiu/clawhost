@@ -5,6 +5,7 @@ import (
 
 	authmw "github.com/clawhost/clawhost/middleware"
 	"github.com/clawhost/clawhost/model"
+	auditservice "github.com/clawhost/clawhost/service/audit"
 	"github.com/clawhost/clawhost/service/k8s"
 	"github.com/clawhost/clawhost/util"
 	"github.com/labstack/echo/v4"
@@ -63,6 +64,17 @@ func AdminCreateBot(c echo.Context) error {
 	if err := model.CreateBot(bot); err != nil {
 		return util.InternalError(c, "failed to create bot")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.create",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+		Metadata: map[string]interface{}{
+			"slug": bot.Slug,
+		},
+	})
 
 	return util.Success(c, bot)
 }
@@ -85,6 +97,17 @@ func AdminStartBot(c echo.Context) error {
 	}
 
 	if bot.Status == model.BotStatusRunning {
+		writeAuditEntry(c, auditservice.Entry{
+			AppID:       bot.AppID,
+			Action:      "bot.start",
+			TargetType:  "bot",
+			TargetID:    bot.ID,
+			TargetLabel: bot.Name,
+			Result:      model.AuditResultFailure,
+			Metadata: map[string]interface{}{
+				"reason": "bot is already running",
+			},
+		})
 		return util.BadRequest(c, "bot is already running")
 	}
 
@@ -122,6 +145,14 @@ func AdminStartBot(c echo.Context) error {
 
 	bot.Status = model.BotStatusStarting
 	bot.Endpoint = endpoint
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.start",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+	})
 	return util.Success(c, bot)
 }
 
@@ -134,6 +165,17 @@ func AdminStopBot(c echo.Context) error {
 	}
 
 	if bot.Status != model.BotStatusRunning {
+		writeAuditEntry(c, auditservice.Entry{
+			AppID:       bot.AppID,
+			Action:      "bot.stop",
+			TargetType:  "bot",
+			TargetID:    bot.ID,
+			TargetLabel: bot.Name,
+			Result:      model.AuditResultFailure,
+			Metadata: map[string]interface{}{
+				"reason": "bot is not running",
+			},
+		})
 		return util.BadRequest(c, "bot is not running")
 	}
 
@@ -151,6 +193,14 @@ func AdminStopBot(c echo.Context) error {
 
 	bot.Status = model.BotStatusStopped
 	bot.Endpoint = ""
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.stop",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+	})
 	return util.Success(c, bot)
 }
 
@@ -171,6 +221,14 @@ func AdminDeleteBot(c echo.Context) error {
 	if err := model.DeleteBot(bot.ID); err != nil {
 		return util.InternalError(c, "failed to delete bot")
 	}
+	writeAuditEntry(c, auditservice.Entry{
+		AppID:       bot.AppID,
+		Action:      "bot.delete",
+		TargetType:  "bot",
+		TargetID:    bot.ID,
+		TargetLabel: bot.Name,
+		Result:      model.AuditResultSuccess,
+	})
 
 	return util.Success(c, map[string]string{"message": "bot deleted"})
 }
