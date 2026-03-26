@@ -19,6 +19,7 @@ func TestUpgradeBotWritesFailureAuditWhenBotNotRunning(t *testing.T) {
 	if err := db.AutoMigrate(&model.AdminUser{}, &model.AuditLog{}, &model.Bot{}); err != nil {
 		t.Fatalf("migrate models: %v", err)
 	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := mustCreateAdminUser(t, "operator@example.com")
 	bot := &model.Bot{
@@ -72,6 +73,7 @@ func TestUpgradeAllBotsWritesSummaryAudit(t *testing.T) {
 	if err := db.AutoMigrate(&model.AdminUser{}, &model.AuditLog{}, &model.Bot{}); err != nil {
 		t.Fatalf("migrate models: %v", err)
 	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := mustCreateAdminUser(t, "platform@example.com")
 	botA := &model.Bot{
@@ -155,6 +157,7 @@ func TestRestartAllBotsWritesInitiationAudit(t *testing.T) {
 	if err := db.AutoMigrate(&model.AdminUser{}, &model.AuditLog{}, &model.Bot{}); err != nil {
 		t.Fatalf("migrate models: %v", err)
 	}
+	migrateAdminPolicyModelsForTest(t, db)
 
 	admin := mustCreateAdminUser(t, "restart@example.com")
 	bot := &model.Bot{
@@ -215,6 +218,13 @@ func mustCreateAdminUser(t *testing.T, email string) *model.AdminUser {
 	}
 	if err := model.CreateAdminUser(admin); err != nil {
 		t.Fatalf("create admin user: %v", err)
+	}
+	if err := model.CreateAdminMembership(&model.AdminMembership{
+		AdminUserID: admin.ID,
+		Role:        model.AdminRolePlatformAdmin,
+		ScopeType:   model.AdminScopePlatform,
+	}); err != nil {
+		t.Fatalf("create admin membership: %v", err)
 	}
 	return admin
 }

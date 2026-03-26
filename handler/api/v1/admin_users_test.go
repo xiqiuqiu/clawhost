@@ -168,7 +168,7 @@ func TestCreateAdminUserCreatesMembershipAndAuditLog(t *testing.T) {
 	if access.ScopeMode != model.AdminScopeModeSelectedApps {
 		t.Fatalf("expected selected app scope mode, got %q", access.ScopeMode)
 	}
-	if len(access.AppScopeIDs) != 2 || access.AppScopeIDs[0] != appOne.ID || access.AppScopeIDs[1] != appTwo.ID {
+	if len(access.AppScopeIDs) != 2 || !contains(access.AppScopeIDs, appOne.ID) || !contains(access.AppScopeIDs, appTwo.ID) {
 		t.Fatalf("unexpected app scope ids: %#v", access.AppScopeIDs)
 	}
 
@@ -377,4 +377,13 @@ func TestCreateAdminUserRejectsUnknownScopedAppID(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
