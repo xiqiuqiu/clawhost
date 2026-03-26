@@ -41,6 +41,22 @@ func ListAdminMembershipsByUser(adminUserID string) ([]*AdminMembership, error) 
 	return memberships, nil
 }
 
+func ReplaceAdminMemberships(adminUserID string, memberships []*AdminMembership) error {
+	return util.GetDB().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("admin_user_id = ?", adminUserID).Delete(&AdminMembership{}).Error; err != nil {
+			return err
+		}
+
+		for _, membership := range memberships {
+			membership.AdminUserID = adminUserID
+			if err := tx.Create(membership).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func AdminHasPermission(adminUserID, permission, appID string) (bool, error) {
 	memberships, err := ListAdminMembershipsByUser(adminUserID)
 	if err != nil {

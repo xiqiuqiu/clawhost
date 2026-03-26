@@ -20,6 +20,7 @@ const (
 	PermissionAppsUpdate     = "apps:update"
 	PermissionAppsDelete     = "apps:delete"
 	PermissionAppsTokenReset = "apps:token_reset"
+	PermissionAdminsManage   = "admins:manage"
 	PermissionBotsRead       = "bots:read"
 	PermissionBotsCreate     = "bots:create"
 	PermissionBotsStart      = "bots:start"
@@ -36,6 +37,7 @@ var rolePermissions = map[string]map[string]bool{
 		PermissionAppsUpdate:     true,
 		PermissionAppsDelete:     true,
 		PermissionAppsTokenReset: true,
+		PermissionAdminsManage:   true,
 		PermissionBotsRead:       true,
 		PermissionBotsCreate:     true,
 		PermissionBotsStart:      true,
@@ -76,6 +78,7 @@ var allPermissions = []string{
 	PermissionAppsUpdate,
 	PermissionAppsDelete,
 	PermissionAppsTokenReset,
+	PermissionAdminsManage,
 	PermissionBotsRead,
 	PermissionBotsCreate,
 	PermissionBotsStart,

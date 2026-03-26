@@ -25,6 +25,8 @@ export interface AdminSessionPayload {
   expires_at: string;
 }
 
+export interface ManagedAdminUser extends AdminUser {}
+
 export interface AuditLog {
   id: string;
   actor_admin_id: string;
@@ -130,6 +132,37 @@ export async function getCurrentAdmin() {
     ...res,
     data: normalizeAdminSessionPayload(res.data),
   };
+}
+
+export async function listManagedAdminUsers() {
+  return request<ManagedAdminUser[]>("/admin-users");
+}
+
+export async function createManagedAdminUser(data: {
+  email: string;
+  name: string;
+  password: string;
+  role: string;
+}) {
+  return request<ManagedAdminUser>("/admin-users", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateManagedAdminUser(
+  id: string,
+  data: {
+    name?: string;
+    status?: string;
+    role?: string;
+    password?: string;
+  }
+) {
+  return request<ManagedAdminUser>(`/admin-users/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }
 
 export function hasStoredSessionToken(): boolean {

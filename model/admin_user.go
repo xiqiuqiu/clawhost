@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/clawhost/clawhost/service/auth"
+	authservice "github.com/clawhost/clawhost/service/auth"
 	"github.com/clawhost/clawhost/util"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -39,7 +39,7 @@ func (u *AdminUser) BeforeCreate(tx *gorm.DB) error {
 		u.Status = AdminUserStatusActive
 	}
 	if u.PasswordHash != "" && !strings.HasPrefix(u.PasswordHash, "$2") {
-		hashed, err := auth.HashPassword(u.PasswordHash)
+		hashed, err := authservice.HashPassword(u.PasswordHash)
 		if err != nil {
 			return err
 		}
@@ -90,4 +90,12 @@ func UpdateAdminUserStatus(id, status string) error {
 		"status":     status,
 		"updated_at": time.Now(),
 	}).Error
+}
+
+func SaveAdminUser(user *AdminUser) error {
+	return util.GetDB().Save(user).Error
+}
+
+func HashAdminPassword(password string) (string, error) {
+	return authservice.HashPassword(password)
 }

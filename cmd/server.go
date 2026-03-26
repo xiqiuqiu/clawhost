@@ -165,6 +165,9 @@ func startServer() {
 	{
 		admin.POST("/logout", v1.AdminLogout)
 		admin.GET("/me", v1.GetCurrentAdmin)
+		admin.GET("/admin-users", v1.ListAdminUsers, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.POST("/admin-users", v1.CreateAdminManagedUser, authmw.RequirePermission(model.PermissionAdminsManage))
+		admin.PUT("/admin-users/:id", v1.UpdateAdminManagedUser, authmw.RequirePermission(model.PermissionAdminsManage))
 
 		// Global config (for admin UI)
 		admin.GET("/config", func(c echo.Context) error {
