@@ -20,6 +20,7 @@ const (
 	BotStatusRunning  BotStatus = "running"
 	BotStatusStopped  BotStatus = "stopped"
 	BotStatusError    BotStatus = "error"
+	BotStatusDeleted  BotStatus = "deleted"
 )
 
 type Bot struct {
@@ -288,7 +289,7 @@ func UpdateBotSlug(id, slug string) error {
 
 func ListBotsByUserID(userID string) ([]*Bot, error) {
 	var bots []*Bot
-	if err := util.GetDB().Where("user_id = ?", userID).Order("created_at DESC").Find(&bots).Error; err != nil {
+	if err := util.GetDB().Where("user_id = ? AND status != ?", userID, BotStatusDeleted).Order("created_at DESC").Find(&bots).Error; err != nil {
 		return nil, err
 	}
 	return bots, nil
@@ -296,7 +297,7 @@ func ListBotsByUserID(userID string) ([]*Bot, error) {
 
 func ListBotsByAppAndUser(appID, userID string) ([]*Bot, error) {
 	var bots []*Bot
-	query := util.GetDB()
+	query := util.GetDB().Where("status != ?", BotStatusDeleted)
 	if appID != "" {
 		query = query.Where("app_id = ?", appID)
 	}
@@ -311,7 +312,7 @@ func ListBotsByAppAndUser(appID, userID string) ([]*Bot, error) {
 
 func ListAllBots() ([]*Bot, error) {
 	var bots []*Bot
-	if err := util.GetDB().Order("created_at DESC").Find(&bots).Error; err != nil {
+	if err := util.GetDB().Where("status != ?", BotStatusDeleted).Order("created_at DESC").Find(&bots).Error; err != nil {
 		return nil, err
 	}
 	return bots, nil
@@ -342,6 +343,21 @@ func UpdateBotStatus(id string, status BotStatus, endpoint string) error {
 		updates["endpoint"] = endpoint
 	}
 	return util.GetDB().Model(&Bot{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// ListExpiredBots returns bots that have expired beyond the grace period,
+// ordered by expiration time (oldest first), limited to a batch size.
+func ListExpiredBots(grace time.Duration, limit int) ([]*Bot, error) {
+	var bots []*Bot
+	cutoff := time.Now().Add(-grace)
+	if err := util.GetDB().
+		Where("expires_at IS NOT NULL AND expires_at < ? AND status != ?", cutoff, BotStatusDeleted).
+		Order("expires_at ASC").
+		Limit(limit).
+		Find(&bots).Error; err != nil {
+		return nil, err
+	}
+	return bots, nil
 }
 
 // AutoMigrate creates the table if it doesn't exist
